@@ -24,7 +24,7 @@ def client(tmp_path, monkeypatch):
 
 def test_pages(client):
     c, _ = client
-    assert c.get("/").status_code == 200 and "Anonimizuj" in c.get("/").text
+    assert c.get("/").status_code == 200 and "Przeciągnij plik .docx" in c.get("/").text
     assert c.get("/settings").status_code == 200
     assert c.get("/static/style.css").status_code == 200
     assert c.get("/static/../main.py").status_code in (404, 400)
@@ -40,6 +40,11 @@ def test_upload_docx(client, fixture_docx):
     assert j["filename"] == "Wyrok_przyklad_anonimizacja.md"
     assert "[OSOBA_5]" in j["markdown"] and "Kowalski" not in j["markdown"]
     assert any(m["placeholder"] == "[OSOBA_5]" for m in j["mapping"])
+    # podgląd: oryginał zachowuje tekst, wersja zanonimizowana ma placeholdery w tych samych miejscach
+    orig = "".join(s["t"] for b in j["preview"] if "orig" in b for s in b["orig"])
+    anon = "".join(s["t"] for b in j["preview"] if "anon" in b for s in b["anon"])
+    assert "Kowalskiego" in orig and "Kowalski" not in anon and "[OSOBA_" in anon
+    assert any(s.get("e") == "PERSON" for b in j["preview"] if "orig" in b for s in b["orig"])
 
 
 def test_upload_rejects_non_docx(client):

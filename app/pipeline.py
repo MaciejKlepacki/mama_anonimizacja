@@ -20,6 +20,7 @@ class Result:
     blocks: int
     seconds: float
     warnings: List[str] = field(default_factory=list)
+    preview: List[dict] = field(default_factory=list)
 
 
 PROPAGATE_ENTITIES = {
@@ -40,8 +41,12 @@ def _texts(blocks: List[Block]):
                         yield bi, (ri, ci), cell
 
 
-def anonymize_blocks(blocks: List[Block], engine: Anonymizer, propagate: bool = True):
-    """Dwa przebiegi: 1) analiza wszystkich fragmentów, 2) propagacja znanych wartości + podmiana."""
+def anonymize_blocks(blocks: List[Block], engine: Anonymizer, propagate: bool = True, spans: Optional[dict] = None):
+    """Dwa przebiegi: 1) analiza wszystkich fragmentów, 2) propagacja znanych wartości + podmiana.
+
+    Jeśli podano `spans` (dict), trafiają do niego wykryte fragmenty:
+    (indeks bloku, pozycja) → [(start, end, typ encji, placeholder)].
+    """
     mapper = engine.new_mapper()
     items = list(_texts(blocks))
     analyzed = [(bi, pos, text, engine.analyze(text)) for bi, pos, text in items]
@@ -57,7 +62,12 @@ def anonymize_blocks(blocks: List[Block], engine: Anonymizer, propagate: bool = 
     replaced: Dict[tuple, str] = {}
     for bi, pos, text, results in analyzed:
         results = engine.analyze_with_known(text, results, known_recs)
-        replaced[(bi, pos)] = engine.anonymize_text(text, mapper, results)[0]
+        replaced[(bi, pos)], used = engine.anonymize_text(text, mapper, results)
+        if spans is not None and used:
+            spans[(bi, pos)] = [
+                (r.start, r.end, r.entity_type, mapper.by_key.get(mapper.key(r.entity_type, text[r.start : r.end]), ""))
+                for r in sorted(used, key=lambda r: r.start)
+            ]
 
     out: List[Block] = []
     for bi, b in enumerate(blocks):
@@ -69,6 +79,41 @@ def anonymize_blocks(blocks: List[Block], engine: Anonymizer, propagate: bool = 
             rows = [[replaced.get((bi, (ri, ci)), c) for ci, c in enumerate(row)] for ri, row in enumerate(b.rows)]
             out.append(TableBlock(rows=rows))
     return out, mapper
+
+
+def _segments(text: str, found: List[tuple], anonymized: bool) -> List[dict]:
+    """Dzieli tekst na segmenty {t, e, p}; wykryte fragmenty mają typ encji (e) i placeholder (p)."""
+    segs: List[dict] = []
+    pos = 0
+    for start, end, entity, ph in found:
+        if start < pos:
+            continue
+        if start > pos:
+            segs.append({"t": text[pos:start]})
+        segs.append({"t": ph if anonymized else text[start:end], "e": entity, "p": ph})
+        pos = end
+    if pos < len(text):
+        segs.append({"t": text[pos:]})
+    return segs
+
+
+def build_preview(blocks: List[Block], spans: dict) -> List[dict]:
+    """Podgląd obok siebie: dla każdego bloku wersja oryginalna i zanonimizowana z zaznaczeniami."""
+
+    def pair(bi, pos, text):
+        found = spans.get((bi, pos), [])
+        return {"orig": _segments(text, found, False), "anon": _segments(text, found, True)}
+
+    out: List[dict] = []
+    for bi, b in enumerate(blocks):
+        if isinstance(b, TextBlock):
+            out.append({"kind": b.kind, "level": b.level, "ordered": b.ordered, "alignment": b.alignment, **pair(bi, None, b.text)})
+        elif isinstance(b, FootnoteBlock):
+            out.append({"kind": "footnote", "id": b.id, **pair(bi, None, b.text)})
+        elif isinstance(b, TableBlock):
+            rows = [[pair(bi, (ri, ci), c) for ci, c in enumerate(row)] for ri, row in enumerate(b.rows)]
+            out.append({"kind": "table", "rows": rows})
+    return out
 
 
 def anonymize_docx(
@@ -83,7 +128,8 @@ def anonymize_docx(
     warnings: List[str] = []
     if not blocks:
         warnings.append("Dokument nie zawiera tekstu (pusty lub tylko grafika).")
-    anon_blocks, mapper = anonymize_blocks(blocks, engine)
+    spans: dict = {}
+    anon_blocks, mapper = anonymize_blocks(blocks, engine, spans=spans)
     md = build_markdown(anon_blocks, mapper.mapping(), engine.labels, settings.output, source_name)
     return Result(
         markdown=md,
@@ -92,6 +138,7 @@ def anonymize_docx(
         blocks=len(blocks),
         seconds=round(time.perf_counter() - t0, 2),
         warnings=warnings,
+        preview=build_preview(blocks, spans),
     )
 
 
