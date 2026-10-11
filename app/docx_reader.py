@@ -278,8 +278,80 @@ def read_docx(source: Union[str, bytes, BytesIO], settings: Optional[DocxSetting
                 if t:
                     blocks.append(TextBlock("paragraph", t))
 
+    if settings.drop_page_numbers:
+        blocks = drop_page_numbers(blocks)
+    if settings.merge_wrapped_lines:
+        blocks = merge_wrapped_lines(blocks)
+
     if settings.include_footnotes:
         for fid, text in _footnotes(doc).items():
             blocks.append(FootnoteBlock(id=fid, text=text))
 
     return blocks
+
+
+# ---------------------------------------------------------------------------
+# Dokumenty z konwersji PDF → Word: każda linia to osobny akapit, numery stron luzem
+# ---------------------------------------------------------------------------
+_PAGE_NO = re.compile(r"^\d{1,3}$")
+_ENDS_SENTENCE = re.compile(r"[.!?:;…][\"”»)\]]*$")
+_ABBREV_DOT = re.compile(
+    r"(?:^|\s)(?:art|ust|pkt|lit|ul|al|pl|os|nr|r|tj|np|m|dz|ww|poz|ok|godz|tel|zw|sp|o|s|str|ks|św|im|dr|prof|mgr|"
+    r"inż|itp|itd|w|z|ze|do|od|t|j|k|par|rozp|zał|ewid|obr|gm|woj|pow|ur|zm|dot|proc|min|max|tzw|br|c|d|e|f|g|h|"
+    r"i|[a-z])\.$",
+    re.IGNORECASE,
+)
+_LIST_LIKE = re.compile(r"^\s*(?:\(?\d{1,3}[.)]|\(?[a-z][.)]|[-–•*§]|[IVXLC]{1,5}[.)])\s")
+
+
+def drop_page_numbers(blocks: List[Block]) -> List[Block]:
+    """Usuwa akapity będące samymi numerami stron (rosnący ciąg co najmniej 3 liczb)."""
+    idx = [i for i, b in enumerate(blocks) if isinstance(b, TextBlock) and b.kind == "paragraph" and _PAGE_NO.match(b.text)]
+    if len(idx) < 3:
+        return blocks
+    nums = [int(blocks[i].text) for i in idx]
+    if any(b <= a for a, b in zip(nums, nums[1:])):
+        return blocks
+    drop = set(idx)
+    return [b for i, b in enumerate(blocks) if i not in drop]
+
+
+def _looks_pdf_wrapped(blocks: List[Block]) -> bool:
+    paras = [b.text for b in blocks if isinstance(b, TextBlock) and b.kind == "paragraph" and len(b.text) >= 25]
+    if len(paras) < 8:
+        return False
+    no_punct = sum(1 for t in paras if "\n" not in t and not _ENDS_SENTENCE.search(t))
+    return no_punct / len(paras) >= 0.25
+
+
+def _can_join(a: TextBlock, b: TextBlock) -> bool:
+    ta, tb = a.text, b.text
+    if a.kind != "paragraph" or b.kind != "paragraph" or "\n" in ta or "\n" in tb:
+        return False
+    if a.alignment == "center" or b.alignment == "center":
+        return False
+    if ta.isupper() and len(ta) >= 4:
+        return False
+    if _LIST_LIKE.match(tb):
+        return False
+    continues = tb[:1].islower() or tb[:1].isdigit() or tb[:1] in "([„\"–-"
+    if _ENDS_SENTENCE.search(ta) and not _ABBREV_DOT.search(ta):
+        return False
+    if ta.endswith((",", "–", "-")) or continues:
+        return True
+    return len(ta) >= 25
+
+
+def merge_wrapped_lines(blocks: List[Block]) -> List[Block]:
+    """Skleja linie podzielone przy konwersji PDF → Word w pełne akapity (tylko gdy dokument tak wygląda)."""
+    if not _looks_pdf_wrapped(blocks):
+        return blocks
+    out: List[Block] = []
+    for b in blocks:
+        if out and isinstance(b, TextBlock) and isinstance(out[-1], TextBlock) and _can_join(out[-1], b):
+            prev = out[-1]
+            joiner = "" if prev.text.endswith("-") and not prev.text.endswith(" -") and b.text[:1].islower() else " "
+            out[-1] = TextBlock(prev.kind, prev.text + joiner + b.text, level=prev.level, ordered=prev.ordered, alignment=prev.alignment)
+            continue
+        out.append(b)
+    return out

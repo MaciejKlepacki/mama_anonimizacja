@@ -8,6 +8,8 @@ from typing import Iterable, List, Optional
 from presidio_analyzer import EntityRecognizer, Pattern, PatternRecognizer, RecognizerResult
 from presidio_analyzer.nlp_engine import NlpArtifacts
 
+from .names import first_name_regex_alternatives
+
 LANG = "pl"
 
 # Litery polskie (do wzorców)
@@ -147,8 +149,9 @@ def valid_id_card(s: str) -> bool:
 PLOT_NUMBER = r"\d{1,5}(?:/\d{1,5})?"
 PLOT_LIST = rf"{PLOT_NUMBER}(?:\s*(?:,|;|i|oraz|a także|-|–)\s*{PLOT_NUMBER})*"
 PLOT_CTX = (
-    r"(?:działk[aiąęo]\w*|dz\.|nr\s+ewid\w*\.?|nr\s+geod\w*\.?|ewidencyjn\w+)"
-    r"(?:\s+(?:gruntow\w+|ewidencyjn\w+|geodezyjn\w+|rolne\w*|budowlan\w+|lasow\w+|nr\.?|numer\w*|o\s+numerze|oznaczon\w+|jako))*"
+    r"(?:dział(?:k\w*|ek)|dz\.|nr\s+ewid\w*\.?|nr\s+geod\w*\.?|ewidencyjn\w+)"
+    r"(?:\s+(?:gruntow\w+|ewidencyjn\w+|geodezyjn\w+|rolne\w*|budowlan\w+|lasow\w+|sąsiedni\w+|sąsiadując\w+|"
+    r"przyległ\w+|inwestor\w+|objęt\w+|położon\w+|drogow\w+|nr\.?|numer\w*|o\s+numerze|oznaczon\w+|jako))*"
 )
 PLOT_PATTERNS = [
     rf"\b{PLOT_CTX}\s*(?:nr\.?|numer\w*)?\s*:?\s*(?P<val>{PLOT_LIST})(?![\d/])",
@@ -162,6 +165,46 @@ ADDRESS_PATTERNS = [
     rf"(?<![\w.@/-])(?P<val>{STREET_PREFIX}\s+(?:{STREET_WORD}\s+){{1,5}}?{HOUSE_NO})(?![\d/])",
     # 00-950 Warszawa, 05-123 Nowa Wieś Wielka
     rf"\b(?P<val>\d{{2}}-\d{{3}}\s+[{UP}][{LO}{UP}\-]+(?:\s+[{UP}][{LO}{UP}\-]+){{0,2}})\b",
+]
+
+# ul. Lasówka / ulicy Golikówka / al. Trzech Wieszczów – bez numeru (do sprawdzenia przez człowieka)
+_STREET_NAME_WORD = rf"(?:[{UP}][{LO}{UP}\-]+|(?:gen|płk|ppłk|mjr|kpt|por|ks|św|dr|prof|im|bp|abp|marsz|hm|inż|mgr|adm|kard)\.)"
+STREET_ONLY_PATTERNS = [
+    rf"(?<![\w.@/-])(?P<val>{STREET_PREFIX}\s+(?:{_STREET_NAME_WORD}\s+){{0,3}}[{UP}][{LO}{UP}\-]{{2,}})(?![\w\-]|\s+\d)",
+]
+
+# Osoby po tytule / zwrocie grzecznościowym: "pani Anny Habryki", "radca prawny Jan Nowak", "adw. Anna Kowalska"
+_TITLE = (
+    r"(?:pani?[aąeiu]?|państw[oa]|p\.|radc[aąęy]\s+prawn\w+|r\.\s?pr\.|adw\.|adwokat\w*|mec\.|mecenas\w*|"
+    r"mgr(?:\s+inż\.)?|inż\.|dr(?:\s+hab\.)?|prof\.|sędzi\w+|notariusz\w*|asesor\w*|referendarz\w*|"
+    r"pełnomocnik\w*:?|skarżąc\w+:?|uczestni\w+:?|wnioskodawc\w+:?|inwestor\w*:?|projektant\w*:?|"
+    r"właściciel\w*:?|świadek:?|świadk\w+:?|oskarżon\w+:?|pozwan\w+:?|powód:?|powódk\w+:?|powoda:?)"
+)
+_NAME_WORD = rf"[{UP}][{LO}]+(?:-[{UP}][{LO}]+)?"
+_FIRST = first_name_regex_alternatives()
+PERSON_PATTERNS = [
+    # tytuł + imię + nazwisko (1–2 wyrazy nazwiska)
+    rf"\b{_TITLE}\s+(?P<val>{_FIRST}\s+{_NAME_WORD}(?:\s+{_NAME_WORD})?)(?![{LO}])",
+    # imię + nazwisko bez tytułu (imię z listy popularnych imion)
+    rf"(?<![{UP}{LO}])(?P<val>{_FIRST}\s+{_NAME_WORD})(?![{LO}])",
+]
+
+# Spółki: "Gumniska sp. z o.o.", "Budimex S.A.", "Nowak i Wspólnicy sp. j."
+_LEGAL_FORM = (
+    r"(?i:sp(?:ółk[aąię]|\.)\s*z\s*o\.?\s*o\.?|spółk[aąię]\s+z\s+ograniczoną\s+odpowiedzialnością|"
+    r"S\.?\s?A\.|spółk[aąię]\s+akcyjn[aąej]+|sp\.\s*j\.|spółk[aąię]\s+jawn[aąej]+|sp\.\s*k\.|"
+    r"spółk[aąię]\s+komandytow[aąej]+|S\.K\.A\.|sp\.\s*p\.|spółk[aąię]\s+partnersk[aąiej]+|"
+    r"P\.S\.A\.|s\.c\.|spółk[aąię]\s+cywiln[aąej]+)"
+)
+_ORG_WORD = rf"(?:[{UP}0-9][{UP}{LO}0-9&\-\.]*|i|oraz|and|&|z|do|dla)"
+COMPANY_PATTERNS = [
+    rf"(?<![\w\-])(?P<val>(?:[„\"][^„\"”]{{2,60}}[”\"]\s+|{_ORG_WORD}(?:\s+{_ORG_WORD}){{0,5}}\s+){_LEGAL_FORM})(?![{LO}])",
+]
+
+# Numery decyzji / znaki spraw urzędowych: "znak: AU-01-4.6740.1.263.2024.GPA", "decyzja nr 285/6740.1/2025"
+DECISION_NUMBER_PATTERNS = [
+    r"\b(?i:znak|sygn\.?(?:\s*akt)?|sygnatur[aąęy])\s*:?\s*(?P<val>[A-Z]{1,6}[A-Za-z0-9\.\-/]*\d[A-Za-z0-9\.\-/]*)",
+    r"\b(?i:decyzj\w+|postanowieni\w+|pozwoleni\w+|zaświadczeni\w+|zgłoszeni\w+)(?:\s+\w+){0,4}?\s+nr\.?\s*(?P<val>[A-Za-z0-9][A-Za-z0-9\.\-/]*\d[A-Za-z0-9\.\-/]*)",
 ]
 
 KW_PATTERNS = [r"\b(?P<val>[A-Z]{2}\d[A-Z]\s?/\s?\d{8}\s?/\s?\d)\b"]
@@ -204,6 +247,12 @@ def build_polish_recognizers() -> List[EntityRecognizer]:
             split_pattern=PLOT_NUMBER,
         ),
         RegexGroupRecognizer("ADDRESS", "PlAddressRecognizer", ADDRESS_PATTERNS, score=0.75),
+        RegexGroupRecognizer("ADDRESS", "PlStreetOnlyRecognizer", STREET_ONLY_PATTERNS, score=0.45, flags=re.UNICODE),
+        RegexGroupRecognizer("PERSON", "PlPersonTitleRecognizer", PERSON_PATTERNS, score=0.9, flags=re.UNICODE),
+        RegexGroupRecognizer("ORGANIZATION", "PlCompanyRecognizer", COMPANY_PATTERNS, score=0.9, flags=re.UNICODE),
+        RegexGroupRecognizer(
+            "CASE_SIGNATURE", "PlDecisionNumberRecognizer", DECISION_NUMBER_PATTERNS, score=0.6, flags=re.UNICODE
+        ),
         RegexGroupRecognizer("PL_KW", "PlKwRecognizer", KW_PATTERNS, score=0.9, flags=re.UNICODE),
         RegexGroupRecognizer(
             "PL_NIP",

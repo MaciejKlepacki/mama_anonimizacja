@@ -30,3 +30,20 @@ def fixture_docx():
 
         build(FIXTURE)
     return FIXTURE
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    """Klient API z odizolowanym plikiem ustawień użytkownika."""
+    from fastapi.testclient import TestClient
+
+    import app.settings as st
+    from app import main as main_mod
+
+    user_path = tmp_path / "settings.json"
+    monkeypatch.setattr(st, "USER_SETTINGS_PATH", user_path)
+    monkeypatch.setattr(main_mod, "load_settings", lambda: st.load_settings(user_path))
+    monkeypatch.setattr(main_mod, "save_settings", lambda s: st.save_settings(s, user_path))
+    monkeypatch.setattr(main_mod, "reset_settings", lambda: st.reset_settings(user_path))
+    with TestClient(main_mod.app) as c:
+        yield c, user_path

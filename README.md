@@ -6,20 +6,35 @@ Wszystko działa na `localhost`; pliki nie są nigdzie wysyłane ani zapisywane 
 
 ## Co robi
 
-1. Wrzucasz plik `.docx` w przeglądarce (http://127.0.0.1:8765).
+1. Wrzucasz plik `.docx` w przeglądarce (http://127.0.0.1:8765) **albo wklejasz tekst** („…albo wklej tekst
+   zamiast pliku”) – tekst z PDF-a lub Worda przechodzi przez to samo sklejanie połamanych linii.
 2. Pipeline wykrywa i podmienia dane wrażliwe na spójne placeholdery, domyślnie:
    - imiona i nazwiska → `[OSOBA_1]`, `[OSOBA_2]`, …
    - adresy (ulica + numer, kod pocztowy + miejscowość) → `[ADRES_n]`
    - numery działek ewidencyjnych („działka nr 123/4", „dz. 12, 13/2") → `[DZIAŁKA_n]`
    - numery ksiąg wieczystych, PESEL, NIP, REGON, KRS, dowód osobisty, telefon, e-mail, IBAN
-   - opcjonalnie (wyłączone domyślnie): miejscowości, organizacje, daty, sygnatury akt, adresy www
-3. Wynik to plik Markdown gotowy do wklejenia do czatu z LLM:
+   - organizacje (spółki z formą prawną, np. „Gumniska sp. z o.o.”, także skrócone „Gumniska”),
+     numery spraw/decyzji („znak: AU-01-…”, „decyzja nr 285/…”)
+   - miejscowości, daty, adresy www (wszystkie rodzaje danych są domyślnie włączone; miejscowość w nazwie
+     organu, np. „Prezydent Miasta Krakowa”, „WSA w Krakowie”, zostaje)
+3. Każde trafienie ma **ocenę pewności** i w podglądzie jest zaznaczone kolorem:
+   - **zielone** – pewne, anonimizowane bez pytania (imię + nazwisko, numery z sumą kontrolną, działki z kontekstem),
+   - **pomarańczowe z „?”** – do sprawdzenia: anonimizowane domyślnie, ale człowiek klika **OK** albo **Nie**
+     (np. organizacja wg modelu, ulica bez numeru, numer sprawy, samo nazwisko pasujące do kilku osób),
+   - **szare** – zostaje w tekście (odrzucone kliknięciem „Nie” albo sugestia typu PZT, WSA, sygnatura
+     cytowanego orzeczenia); nadal można kliknąć i zmienić decyzję.
+   W okienku można też zmienić typ danych i **scalić** z inną osobą („scal z…”).
+   **Marker** (przełącznik obok „Pokaż [OSOBA_1]”): każde zaznaczenie myszą od razu anonimizuje tekst jako
+   `[ZANONIMIZOWANE_DANE_n]` (inny odcień zielonego, wszystkie wystąpienia); kliknięcie cofa lub zmienia typ.
+   Bez markera zaznaczenie pokazuje pasek wyboru typu (osoba, organizacja, adres…).
+4. Wynik to plik Markdown gotowy do wklejenia do czatu z LLM:
    - krótki wstęp objaśniający modelowi placeholdery + legenda,
    - zachowana struktura: nagłówki, listy, tabele, przypisy,
    - jeden placeholder = jedna osoba/obiekt w całym dokumencie, także mimo odmiany
      („Jan Kowalski", „Jana Kowalskiego", „Kowalski" → `[OSOBA_1]`),
    - bez zbędnych pustych linii i formatowania.
-4. Osobno dostępna jest **mapa placeholderów** (JSON, tylko lokalnie) – do odczytania odpowiedzi modelu.
+5. Osobno dostępna jest **mapa placeholderów** (JSON, tylko lokalnie) – do odczytania odpowiedzi modelu.
+6. Podczas przetwarzania (duże dokumenty: kilkadziesiąt sekund) widać pasek postępu z etapem i procentem.
 
 ## Instalacja na Windows (ikona na pulpicie)
 
@@ -28,6 +43,16 @@ Wszystko działa na `localhost`; pliki nie są nigdzie wysyłane ani zapisywane 
    Pythona (przez `winget`), biblioteki i model językowy.
 3. Na pulpicie pojawi się ikona **„Anonimizacja dokumentów”** – dwuklik otwiera osobne okno aplikacji
    (Edge/Chrome w trybie aplikacji). Zamknięcie okna wyłącza program.
+
+### Aktualizacja (gdy program jest już zainstalowany)
+
+Dwukliknij **`aktualizuj.bat`** w folderze programu. Skrypt pobiera najnowszą wersję z GitHuba, nadpisuje
+pliki programu, zachowuje `.venv` (biblioteki i model, więc nic nie pobiera ponownie) oraz Twoje
+`config\settings.json`, doinstalowuje ewentualne nowe biblioteki i odświeża skrót. Trwa kilkanaście sekund.
+
+Jeśli masz jeszcze wersję bez `aktualizuj.bat`: pobierz ZIP (Code → Download ZIP), rozpakuj i skopiuj
+całą zawartość do folderu programu, nadpisując pliki (`.venv` i `config\settings.json` zostaw), a potem
+dwukliknij `instaluj.bat` – zrobi tylko brakujące kroki.
 
 Dzienniki: `%LOCALAPPDATA%\mama_anonimizacja\aplikacja.log`. Odinstalowanie: usuń folder i skrót z pulpitu.
 
@@ -67,7 +92,8 @@ Strona **Ustawienia** (http://127.0.0.1:8765/settings) albo plik `config/setting
 - **allow-lista** – frazy nigdy nie anonimizowane (domyślnie nazwy sądów, województw),
 - **deny-lista** – frazy zawsze anonimizowane, np. `PERSON: Jan Kowalski; Kowalskiego`,
 - **własne rozpoznawacze** regex (Presidio `PatternRecognizer`), np. numery decyzji,
-- opcje czytania Worda (przypisy, nagłówki/stopki, pogrubione linie jako nagłówki),
+- opcje czytania Worda (przypisy, nagłówki/stopki, pogrubione linie jako nagłówki, sklejanie linii
+  z konwersji PDF w akapity, usuwanie samotnych numerów stron),
 - opcje wyniku (tytuł, wstęp dla modelu, legenda).
 
 Na stronie ustawień jest pole „Test na tekście", które sprawdza bieżące (także niezapisane) ustawienia.
@@ -76,22 +102,30 @@ Na stronie ustawień jest pole „Test na tekście", które sprawdza bieżące (
 
 ```
 .docx ──python-docx──▶ bloki (nagłówki/akapity/listy/tabele/przypisy)
-      ──Presidio Analyzer (spaCy NER pl + rozpoznawacze PL)──▶ encje
-      ──propagacja znanych wartości (2. przebieg)──▶ encje także bez kontekstu (np. „123/4" w tabeli)
-      ──Presidio Anonymizer + spójne placeholdery (lematyzacja)──▶ bloki zanonimizowane
+      ──sklejanie linii z PDF, usuwanie numerów stron──▶ pełne akapity (nazwiska nie są rozcięte)
+      ──Presidio Analyzer (spaCy NER pl + rozpoznawacze PL), porcjami po ~4000 znaków──▶ kandydaci
+      ──ocena pewności (pewne / do sprawdzenia / sugestia), filtr organów publicznych, skrótów, ról──▶ fragmenty
+      ──klucze spójności po rdzeniach odmiany (Anny Habryki = Anna Habryka; Kowalski ≠ Kowalska)──▶ te same osoby
+      ──propagacja (2. przebieg): odmiany nazwisk, skrócone nazwy spółek, numery działek w tabelach
+      ──decyzje recenzenta (OK / nie OK / typ / scal / ręczne zaznaczenie) ──▶ /api/render
       ──renderer──▶ Markdown + mapa placeholderów
 ```
+
+Dlaczego nie sam lematyzator spaCy: dla rzadkich nazwisk daje różne lematy dla różnych form
+(„Habryka” → „Habryk”, „Habryki” → „Habryka”), więc ta sama osoba dostawała kilka placeholderów.
+Rdzeń z `app/names.py` obcina końcówki fleksyjne i normalizuje alternacje (Habryce → habryk).
 
 Ważne pliki:
 
 | Plik | Rola |
 | --- | --- |
-| `app/recognizers.py` | polskie rozpoznawacze (działki, adresy, KW, NIP, REGON, KRS, dowód, daty, sygnatury) |
-| `app/engine.py` | konfiguracja Presidio, allow-lista, spójne placeholdery |
+| `app/recognizers.py` | polskie rozpoznawacze (działki, adresy, ulice, osoby po tytule/imieniu, spółki, KW, NIP, REGON, KRS, dowód, daty, sygnatury i numery decyzji) |
+| `app/names.py` | rdzenie odmiany nazw własnych, lista imion (płeć), zwroty pan/pani |
+| `app/engine.py` | konfiguracja Presidio, allow-lista (odporna na odmianę), ocena pewności, klucze spójności, propagacja |
 | `app/docx_reader.py` | czytanie Worda do bloków |
 | `app/markdown.py` | rendering Markdown pod LLM |
-| `app/pipeline.py` | cały przebieg |
-| `app/main.py` | serwer FastAPI + UI (`app/static/`) |
+| `app/pipeline.py` | analiza dokumentu (raz) + rendering z decyzjami recenzenta (wielokrotnie) |
+| `app/main.py` | serwer FastAPI + UI (`app/static/`); `/api/anonymize`, `/api/progress/{job}`, `/api/render` |
 | `config/default_settings.json` | ustawienia domyślne |
 
 ## Testy
@@ -100,11 +134,14 @@ Ważne pliki:
 pytest -q
 ```
 
-Testy używają fikcyjnego wyroku generowanego przez `tests/make_fixture.py`.
+Testy używają fikcyjnego wyroku (`tests/make_fixture.py`) oraz fikcyjnej decyzji „z konwersji PDF”
+(`tests/make_fixture_pdf.py`: linia = akapit, numery stron luzem, nazwiska rozcięte między linie).
 
 ## Ograniczenia
 
-- Automat może coś pominąć (szczególnie nietypowe nazwiska lub adresy bez „ul."). **Zawsze przejrzyj
-  wynik** przed wklejeniem do czatu; pole wyniku jest edytowalne.
+- Automat może coś pominąć (szczególnie nietypowe nazwiska bez imienia lub adresy bez „ul."). **Zawsze
+  przejrzyj wynik** – przycisk „Następny do sprawdzenia” prowadzi po niepewnych fragmentach, a pominięty
+  tekst można zaznaczyć myszą. Przycisk „Kopiuj” ostrzega, gdy coś zostało niesprawdzone.
+- Organy publiczne (sądy, prezydent miasta, wojewoda, rada, ministerstwa) celowo **nie są** anonimizowane.
 - Obsługiwany jest tylko `.docx` (stary `.doc` zapisz w Wordzie jako `.docx`).
 - Grafiki, pola formularzy i komentarze Worda są pomijane.

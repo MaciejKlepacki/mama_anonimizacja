@@ -71,6 +71,8 @@ class DocxSettings(BaseModel):
     detect_bold_headings: bool = True
     include_footnotes: bool = True
     include_headers_footers: bool = False
+    merge_wrapped_lines: bool = True  # dokument z PDF: każda linia to osobny akapit → sklejamy w zdania
+    drop_page_numbers: bool = True  # samotne numery stron ("2", "3", …) z konwersji PDF
 
 
 class OutputSettings(BaseModel):
@@ -122,6 +124,7 @@ class Settings(BaseModel):
         data = self.model_dump(mode="json")
         data.pop("output", None)
         data.pop("docx", None)
+        data.pop("allow_list", None)  # allow-lista podmieniana jest bez przebudowy silnika
         return json.dumps(data, sort_keys=True, ensure_ascii=False)
 
 

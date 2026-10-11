@@ -14,17 +14,21 @@
     "PHONE_NUMBER":   {"enabled": true,  "label": "TELEFON",     "threshold": 0.4},
     "EMAIL_ADDRESS":  {"enabled": true,  "label": "EMAIL",       "threshold": 0.4},
     "IBAN_CODE":      {"enabled": true,  "label": "IBAN",        "threshold": 0.4},
-    "LOCATION":       {"enabled": false, "label": "MIEJSCOWOŚĆ", "threshold": 0.5},
-    "ORGANIZATION":   {"enabled": false, "label": "ORGANIZACJA", "threshold": 0.5},
-    "DATE_TIME":      {"enabled": false, "label": "DATA",        "threshold": 0.4},
-    "CASE_SIGNATURE": {"enabled": false, "label": "SYGNATURA",   "threshold": 0.4},
-    "URL":            {"enabled": false, "label": "URL",         "threshold": 0.5}
+    "LOCATION":       {"enabled": true,  "label": "MIEJSCOWOŚĆ", "threshold": 0.5},
+    "ORGANIZATION":   {"enabled": true,  "label": "ORGANIZACJA", "threshold": 0.5},
+    "DATE_TIME":      {"enabled": true,  "label": "DATA",        "threshold": 0.4},
+    "CASE_SIGNATURE": {"enabled": true,  "label": "SYGNATURA",   "threshold": 0.4},
+    "URL":            {"enabled": true,  "label": "URL",         "threshold": 0.5}
   },
   "custom_recognizers": [],
   "allow_list": [
     "Wojewódzki Sąd Administracyjny",
     "Naczelny Sąd Administracyjny",
     "Samorządowe Kolegium Odwoławcze",
+    "Sąd Najwyższy", "Trybunał Konstytucyjny", "Sąd Okręgowy", "Sąd Rejonowy", "Sąd Apelacyjny",
+    "Rada Ministrów", "Rada Miasta", "Rada Gminy", "Rada Powiatu", "Sejmik Województwa",
+    "Główny Urząd Nadzoru Budowlanego", "Powiatowy Inspektor Nadzoru Budowlanego",
+    "Wojewódzki Inspektor Nadzoru Budowlanego", "Minister Infrastruktury", "Minister Rozwoju",
     "Rzeczpospolita Polska",
     "Rzeczypospolitej Polskiej",
     "Dolnośląskiego", "Kujawsko-Pomorskiego", "Lubelskiego", "Lubuskiego", "Łódzkiego",
@@ -39,7 +43,9 @@
   "docx": {
     "detect_bold_headings": true,
     "include_footnotes": true,
-    "include_headers_footers": false
+    "include_headers_footers": false,
+    "merge_wrapped_lines": true,
+    "drop_page_numbers": true
   },
   "output": {
     "include_intro": true,
