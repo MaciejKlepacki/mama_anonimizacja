@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anonimizacja dokumentu</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Anonimizacja Word → Markdown</h1>
+  <span class="muted">Presidio · działa wyłącznie lokalnie, pliki nie są zapisywane</span>
+  <nav style="margin-left:auto"><a href="/">Dokument</a><a href="/settings">Ustawienia</a></nav>
+</header>
+<main>
+  <div class="card">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".docx">
+      <div><strong>Przeciągnij plik .docx tutaj</strong> lub kliknij, aby wybrać</div>
+      <div class="muted" id="fname">Imiona i nazwiska, adresy, numery działek, PESEL, KW, telefony, e-maile… (zmień w ustawieniach)</div>
+    </label>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="go" disabled>Anonimizuj</button>
+      <span class="muted" id="status"></span>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div id="result" class="hidden">
+    <div class="card">
+      <div class="row">
+        <strong>Wynik (Markdown)</strong>
+        <span id="stats" class="row"></span>
+        <span style="margin-left:auto" class="row">
+          <button id="copy">Kopiuj do schowka</button>
+          <button class="primary" id="download">Pobierz .md</button>
+        </span>
+      </div>
+      <p class="muted">Sprawdź tekst przed wklejeniem do czatu – automat może coś pominąć. Możesz poprawić bezpośrednio w polu poniżej; przycisk „Pobierz" zapisze aktualną treść.</p>
+      <textarea class="md" id="md" spellcheck="false"></textarea>
+    </div>
+    <div class="card">
+      <details>
+        <summary><strong>Mapa placeholderów</strong> <span class="muted">(dane oryginalne – nie wklejaj tego do czatu; służy do odczytania odpowiedzi)</span></summary>
+        <div class="row" style="margin:10px 0"><button id="dlmap">Pobierz mapę (.json)</button></div>
+        <table id="map"><thead><tr><th>Placeholder</th><th>Typ</th><th>Warianty w dokumencie</th><th>Wystąpień</th></tr></thead><tbody></tbody></table>
+      </details>
+    </div>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let file = null, data = null;
+const drop = $('#drop'), input = $('#file');
+input.addEventListener('change', () => pick(input.files[0]));
+['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => pick(ev.dataTransfer.files[0]));
+function pick(f) {
+  if (!f) return;
+  if (!f.name.toLowerCase().endsWith('.docx')) { show('err', 'Wybierz plik .docx (w Wordzie: Zapisz jako → Dokument programu Word).'); return; }
+  file = f; $('#fname').textContent = f.name + ' (' + Math.round(f.size/1024) + ' KB)'; $('#go').disabled = false; show('', '');
+}
+function show(kind, text) { const m = $('#msg'); m.className = kind ? 'msg ' + kind : ''; m.textContent = text; }
+$('#go').addEventListener('click', async () => {
+  if (!file) return;
+  $('#go').disabled = true; $('#status').textContent = 'Przetwarzam… (pierwszy dokument po starcie może potrwać dłużej)'; show('', '');
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch('/api/anonymize', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    data = j; render(j);
+    show('ok', 'Gotowe: ' + Object.values(j.stats).reduce((a,b)=>a+b,0) + ' podmian w ' + j.seconds + ' s.' + (j.warnings.length ? ' ' + j.warnings.join(' ') : ''));
+  } catch (e) { show('err', 'Błąd: ' + e.message); }
+  $('#go').disabled = false; $('#status').textContent = '';
+});
+function render(j) {
+  $('#result').classList.remove('hidden');
+  $('#md').value = j.markdown;
+  const st = $('#stats'); st.innerHTML = '';
+  for (const [k, v] of Object.entries(j.stats)) { const s = document.createElement('span'); s.className = 'stat'; s.textContent = (j.entity_names[k] || k) + ': ' + v; st.appendChild(s); }
+  const tb = $('#map tbody'); tb.innerHTML = '';
+  for (const m of j.mapping) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><span class="ph"></span></td><td></td><td></td><td></td>`;
+    tr.children[0].firstChild.textContent = m.placeholder; tr.children[1].textContent = j.entity_names[m.entity_type] || m.entity_type;
+    tr.children[2].textContent = m.variants.join(' · '); tr.children[3].textContent = m.count; tb.appendChild(tr);
+  }
+}
+function dl(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+$('#download').addEventListener('click', () => dl(data.filename, $('#md').value, 'text/markdown;charset=utf-8'));
+$('#dlmap').addEventListener('click', () => dl(data.mapping_filename, JSON.stringify(data.mapping, null, 2), 'application/json'));
+$('#copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#md').value); show('ok', 'Skopiowano do schowka.'); } catch { $('#md').select(); document.execCommand('copy'); show('ok', 'Skopiowano.'); } });
+</script>
+</body>
+</html>

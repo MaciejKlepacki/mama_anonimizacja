@@ -23,3 +23,9 @@ output/
 *.docx
 *.doc
 *.pdf
+
+# Ustawienia użytkownika (nadpisują default_settings.json)
+config/settings.json
+
+# Testy
+.pytest_cache/
