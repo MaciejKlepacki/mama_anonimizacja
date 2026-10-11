@@ -59,12 +59,11 @@
     </div>
   </div>
 
-  <div class="card">
-    <div class="row">
-      <button class="primary" id="save">Zapisz ustawienia</button>
-      <button id="reset">Przywróć domyślne</button>
-      <span class="muted" id="status"></span>
-    </div>
+  <div class="savebar">
+    <button class="primary savebtn" id="save">Zapisz ustawienia</button>
+    <button id="reset">Przywróć domyślne</button>
+    <span id="savemsg"></span>
+    <span class="muted" id="status"></span>
   </div>
 
   <div class="card">
@@ -79,6 +78,7 @@
 <script>
 const $ = s => document.querySelector(s);
 let S = null, NAMES = {};
+function flash(t, kind) { const f = $('#savemsg'); f.textContent = t; f.className = 'flash ' + kind; clearTimeout(flash.t); flash.t = setTimeout(() => { f.textContent = ''; f.className = ''; }, 4000); }
 function show(kind, text) { const m = $('#msg'); m.className = kind ? 'msg ' + kind : ''; m.textContent = text; }
 async function load() {
   const j = await (await fetch('/api/settings')).json();
@@ -123,8 +123,8 @@ async function send(method, url, body) {
   return j;
 }
 $('#save').addEventListener('click', async () => {
-  try { $('#status').textContent = 'Zapisuję…'; const j = await send('PUT', '/api/settings', collect()); S = j.settings; fill(); show('ok', 'Zapisano. Nowe ustawienia obowiązują od następnego dokumentu.'); }
-  catch (e) { show('err', 'Błąd: ' + e.message); }
+  try { $('#status').textContent = 'Zapisuję…'; const j = await send('PUT', '/api/settings', collect()); S = j.settings; fill(); show('ok', 'Zapisano. Nowe ustawienia obowiązują od następnego dokumentu.'); flash('✓ Zapisano', 'ok'); }
+  catch (e) { show('err', 'Błąd: ' + e.message); flash('Błąd zapisu: ' + e.message, 'err'); }
   $('#status').textContent = '';
 });
 $('#reset').addEventListener('click', async () => {

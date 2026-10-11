@@ -73,7 +73,8 @@ def normalize_key(entity_type: str, text: str, lemmatize=None) -> str:
         if lemmatize is not None:  # "Długiej 5" / "Długa 5" → ten sam adres
             t = " ".join(lemmatize(t))
         return f"{entity_type}:{t}"
-    return f"{entity_type}:{re.sub(r'[\s\-]', '', t)}"
+    compact = re.sub(r"[\s\-]", "", t)
+    return f"{entity_type}:{compact}"
 
 
 @dataclass

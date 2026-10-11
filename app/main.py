@@ -6,6 +6,8 @@ import io
 import json
 import logging
 import re
+import threading
+import time
 import unicodedata
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,14 +27,23 @@ log = logging.getLogger("mama_anonimizacja")
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_MB = 50
 
-@asynccontextmanager
-async def _lifespan(_: FastAPI):
-    """Załaduj model spaCy przy starcie, żeby pierwszy upload nie czekał."""
+STATE: Dict[str, Any] = {"ready": False, "error": None, "last_ping": time.time()}
+
+
+def _warm_up() -> None:
     try:
         get_anonymizer(load_settings())
         log.info("Silnik Presidio gotowy.")
     except Exception as e:  # pragma: no cover - diagnostyka
         log.exception("Nie udało się zbudować silnika: %s", e)
+        STATE["error"] = str(e)
+    STATE["ready"] = True
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    """Załaduj model spaCy w tle: serwer odpowiada od razu, a pierwszy upload nie czeka na model."""
+    threading.Thread(target=_warm_up, daemon=True).start()
     yield
 
 
@@ -99,6 +110,7 @@ async def api_anonymize(file: UploadFile = File(...)) -> JSONResponse:
             "blocks": result.blocks,
             "seconds": result.seconds,
             "warnings": result.warnings,
+            "preview": result.preview,
         }
     )
 
@@ -160,7 +172,14 @@ def api_reset_settings() -> JSONResponse:
 
 @app.get("/api/health")
 def api_health() -> Dict[str, Any]:
-    return {"ok": True, "version": __version__}
+    return {"ok": True, "version": __version__, "ready": STATE["ready"], "error": STATE["error"]}
+
+
+@app.get("/api/ping")
+def api_ping() -> Dict[str, Any]:
+    """Sygnał życia z otwartej strony (launcher wyłącza serwer, gdy okno zniknie)."""
+    STATE["last_ping"] = time.time()
+    return {"ok": True}
 
 
 def run() -> None:  # pragma: no cover - uruchomienie ręczne

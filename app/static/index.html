@@ -9,39 +9,41 @@
 <body>
 <header>
   <h1>Anonimizacja Word → Markdown</h1>
-  <span class="muted">Presidio · działa wyłącznie lokalnie, pliki nie są zapisywane</span>
+  <span class="muted">działa wyłącznie lokalnie, pliki nie są zapisywane</span>
   <nav style="margin-left:auto"><a href="/">Dokument</a><a href="/settings">Ustawienia</a></nav>
 </header>
 <main>
-  <div class="card">
-    <label class="drop" id="drop">
-      <input type="file" id="file" accept=".docx">
-      <div><strong>Przeciągnij plik .docx tutaj</strong> lub kliknij, aby wybrać</div>
-      <div class="muted" id="fname">Imiona i nazwiska, adresy, numery działek, PESEL, KW, telefony, e-maile… (zmień w ustawieniach)</div>
-    </label>
-    <div class="row" style="margin-top:12px">
-      <button class="primary" id="go" disabled>Anonimizuj</button>
-      <span class="muted" id="status"></span>
-    </div>
-    <div id="msg"></div>
-  </div>
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept=".docx">
+    <div id="dropBig"><strong>Przeciągnij plik .docx tutaj</strong> lub kliknij, aby wybrać</div>
+    <div class="muted" id="fname">Anonimizacja uruchomi się od razu po wybraniu pliku.</div>
+    <span id="change" class="hidden"><button type="button" tabindex="-1">Zmień plik</button></span>
+  </label>
+  <div id="msg"></div>
+  <div id="boot" class="msg warn hidden">Uruchamiam silnik anonimizacji (chwilę potrwa, tylko przy starcie)… Możesz już wybrać plik.</div>
 
-  <div id="result" class="hidden">
+  <div id="result" class="hidden" style="margin-top:14px">
+    <button id="copy" class="copybig">Kopiuj Markdown</button>
+    <p class="legend-hint">Kolorem zaznaczono dane, które zostaną zanonimizowane. Najedź na zaznaczenie, żeby zobaczyć, czym zostanie zastąpione; kliknij, żeby podświetlić wszystkie jego wystąpienia.</p>
+    <div class="docbox">
+      <label class="switch" id="swWrap" title="Pokaż w tekście placeholdery zamiast oryginalnych danych"><input type="checkbox" id="sw"><span class="track"></span><span>Pokaż [OSOBA_1]</span></label>
+      <div class="doc" id="doc"></div>
+    </div>
+
+    <div class="bar" style="margin-top:14px">
+      <div class="chips" id="chips"></div>
+      <button id="download">Pobierz .md</button>
+    </div>
+
     <div class="card">
-      <div class="row">
-        <strong>Wynik (Markdown)</strong>
-        <span id="stats" class="row"></span>
-        <span style="margin-left:auto" class="row">
-          <button id="copy">Kopiuj do schowka</button>
-          <button class="primary" id="download">Pobierz .md</button>
-        </span>
-      </div>
-      <p class="muted">Sprawdź tekst przed wklejeniem do czatu – automat może coś pominąć. Możesz poprawić bezpośrednio w polu poniżej; przycisk „Pobierz" zapisze aktualną treść.</p>
-      <textarea class="md" id="md" spellcheck="false"></textarea>
+      <details>
+        <summary><strong>Markdown do wklejenia</strong> <span class="muted">(możesz poprawić – „Kopiuj” i „Pobierz” użyją aktualnej treści)</span></summary>
+        <textarea class="md" id="md" spellcheck="false" style="margin-top:10px"></textarea>
+      </details>
     </div>
     <div class="card">
       <details>
-        <summary><strong>Mapa placeholderów</strong> <span class="muted">(dane oryginalne – nie wklejaj tego do czatu; służy do odczytania odpowiedzi)</span></summary>
+        <summary><strong>Mapa placeholderów</strong> <span class="muted">(dane oryginalne – nie wklejaj do czatu; służy do odczytania odpowiedzi)</span></summary>
         <div class="row" style="margin:10px 0"><button id="dlmap">Pobierz mapę (.json)</button></div>
         <table id="map"><thead><tr><th>Placeholder</th><th>Typ</th><th>Warianty w dokumencie</th><th>Wystąpień</th></tr></thead><tbody></tbody></table>
       </details>
@@ -50,36 +52,106 @@
 </main>
 <script>
 const $ = s => document.querySelector(s);
-let file = null, data = null;
+let data = null;
+const hidden = new Set();
+const HUES = [215, 340, 140, 30, 275, 175, 55, 0, 320, 95, 200, 15];
+const hueOf = {}; let phHue = {};
+const hue = e => hueOf[e] ?? (hueOf[e] = HUES[Object.keys(hueOf).length % HUES.length]);
+
+// ---- stan silnika + sygnał życia (po zamknięciu okna aplikacja sama się wyłącza)
+(async function boot() {
+  for (;;) {
+    try {
+      const h = await (await fetch('/api/health')).json();
+      if (h.ready) { $('#boot').classList.add('hidden'); if (h.error) show('err', 'Silnik nie wystartował: ' + h.error); return; }
+      $('#boot').classList.remove('hidden');
+    } catch {}
+    await new Promise(r => setTimeout(r, 1000));
+  }
+})();
+setInterval(() => fetch('/api/ping').catch(() => {}), 10000);
+
+// ---- wybór pliku (od razu uruchamia anonimizację)
 const drop = $('#drop'), input = $('#file');
 input.addEventListener('change', () => pick(input.files[0]));
 ['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
 ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', ev => pick(ev.dataTransfer.files[0]));
-function pick(f) {
+function show(kind, text) { const m = $('#msg'); m.className = kind ? 'msg ' + kind : ''; m.textContent = text; }
+
+async function pick(f) {
   if (!f) return;
   if (!f.name.toLowerCase().endsWith('.docx')) { show('err', 'Wybierz plik .docx (w Wordzie: Zapisz jako → Dokument programu Word).'); return; }
-  file = f; $('#fname').textContent = f.name + ' (' + Math.round(f.size/1024) + ' KB)'; $('#go').disabled = false; show('', '');
-}
-function show(kind, text) { const m = $('#msg'); m.className = kind ? 'msg ' + kind : ''; m.textContent = text; }
-$('#go').addEventListener('click', async () => {
-  if (!file) return;
-  $('#go').disabled = true; $('#status').textContent = 'Przetwarzam… (pierwszy dokument po starcie może potrwać dłużej)'; show('', '');
-  const fd = new FormData(); fd.append('file', file);
+  $('#fname').textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB) – przetwarzam…';
+  show('', '');
+  const fd = new FormData(); fd.append('file', f);
   try {
     const r = await fetch('/api/anonymize', { method: 'POST', body: fd });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || r.statusText);
     data = j; render(j);
-    show('ok', 'Gotowe: ' + Object.values(j.stats).reduce((a,b)=>a+b,0) + ' podmian w ' + j.seconds + ' s.' + (j.warnings.length ? ' ' + j.warnings.join(' ') : ''));
-  } catch (e) { show('err', 'Błąd: ' + e.message); }
-  $('#go').disabled = false; $('#status').textContent = '';
-});
+    $('#fname').textContent = f.name + ' · ' + Object.values(j.stats).reduce((a, b) => a + b, 0) + ' podmian w ' + j.seconds + ' s';
+    drop.classList.add('compact'); $('#dropBig').classList.add('hidden'); $('#change').classList.remove('hidden');
+    if (j.warnings.length) show('warn', j.warnings.join(' '));
+  } catch (e) { $('#fname').textContent = f.name; show('err', 'Błąd: ' + e.message); }
+  input.value = '';
+}
+
+// ---- podgląd
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function fill(parent, segs) {
+  for (const s of segs) {
+    if (!s.e) { parent.appendChild(document.createTextNode(s.t)); continue; }
+    const m = el('mark', 'm', s.t);
+    m.dataset.e = s.e; m.dataset.p = s.p; m.dataset.o = s.t; m.style.setProperty('--h', hue(s.e));
+    m.style.setProperty('--bh', phHue[s.p] ?? 0);
+    m.dataset.tip = s.p;
+    if ($('#sw').checked) { m.textContent = s.p; m.dataset.tip = s.t; }
+    if (hidden.has(s.e)) m.classList.add('off');
+    parent.appendChild(m);
+  }
+}
+function blockEl(b) {
+  const c = el('div', 'blk');
+  if (b.kind === 'heading') c.classList.add('b-h' + Math.min(b.level || 2, 6));
+  else if (b.kind === 'footnote') { c.classList.add('b-fn'); c.appendChild(document.createTextNode('[^' + b.id + '] ')); }
+  else if (b.kind === 'list') { c.classList.add('b-li'); c.dataset.bullet = b.ordered ? '–' : '•'; c.style.paddingLeft = (34 + (b.level || 0) * 18) + 'px'; }
+  else if (b.alignment) c.style.textAlign = b.alignment;
+  fill(c, b.orig);
+  return c;
+}
+function tableEl(b) {
+  const t = el('table');
+  for (const row of b.rows) {
+    const tr = el('tr');
+    for (const cl of row) { const td = el('td'); fill(td, cl.orig); tr.appendChild(td); }
+    t.appendChild(tr);
+  }
+  return t;
+}
 function render(j) {
   $('#result').classList.remove('hidden');
   $('#md').value = j.markdown;
-  const st = $('#stats'); st.innerHTML = '';
-  for (const [k, v] of Object.entries(j.stats)) { const s = document.createElement('span'); s.className = 'stat'; s.textContent = (j.entity_names[k] || k) + ': ' + v; st.appendChild(s); }
+  hidden.clear();
+  // unikalny kolor obwódki dla każdej osoby / obiektu (kąt złoty = maksymalnie różne odcienie)
+  phHue = {}; j.mapping.forEach((m, i) => { phHue[m.placeholder] = Math.round((i * 137.508) % 360); });
+  $('#swWrap').classList.remove('hidden');
+  // legenda / filtry typów
+  const chips = $('#chips'); chips.innerHTML = '';
+  for (const [k, v] of Object.entries(j.stats)) {
+    const b = el('button', 'chip'); b.style.setProperty('--h', hue(k)); b.type = 'button';
+    const dot = el('span', 'dot'); b.appendChild(dot); b.appendChild(document.createTextNode((j.entity_names[k] || k) + ': ' + v));
+    b.title = 'Pokaż / ukryj kolor tego typu';
+    b.addEventListener('click', () => {
+      hidden.has(k) ? hidden.delete(k) : hidden.add(k); b.classList.toggle('off', hidden.has(k));
+      document.querySelectorAll('mark.m').forEach(m => m.classList.toggle('off', hidden.has(m.dataset.e)));
+    });
+    chips.appendChild(b);
+  }
+  // podgląd dokumentu z zaznaczeniami
+  const doc = $('#doc'); doc.innerHTML = '';
+  for (const b of j.preview) doc.appendChild(b.kind === 'table' ? tableEl(b) : blockEl(b));
+  // mapa
   const tb = $('#map tbody'); tb.innerHTML = '';
   for (const m of j.mapping) {
     const tr = document.createElement('tr');
@@ -88,10 +160,32 @@ function render(j) {
     tr.children[2].textContent = m.variants.join(' · '); tr.children[3].textContent = m.count; tb.appendChild(tr);
   }
 }
+// kliknięcie zaznaczenia → podświetl wszystkie wystąpienia tego placeholdera (po obu stronach)
+$('#doc').addEventListener('click', ev => {
+  const m = ev.target.closest('mark.m'); if (!m) return;
+  const was = m.classList.contains('focus');
+  document.querySelectorAll('mark.m.focus').forEach(x => x.classList.remove('focus'));
+  if (was) return;
+  const all = [...document.querySelectorAll('mark.m')].filter(x => x.dataset.p === m.dataset.p);
+  all.forEach(x => x.classList.add('focus'));
+});
+
+// ---- przełącznik: oryginał ↔ placeholdery (kolory zostają)
+$('#sw').addEventListener('change', () => {
+  const on = $('#sw').checked;
+  document.querySelectorAll('mark.m').forEach(m => { m.textContent = on ? m.dataset.p : m.dataset.o; m.dataset.tip = on ? m.dataset.o : m.dataset.p; });
+  $('#doc').classList.toggle('showph', on);
+});
+
+// ---- widoki i akcje
 function dl(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
 $('#download').addEventListener('click', () => dl(data.filename, $('#md').value, 'text/markdown;charset=utf-8'));
 $('#dlmap').addEventListener('click', () => dl(data.mapping_filename, JSON.stringify(data.mapping, null, 2), 'application/json'));
-$('#copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#md').value); show('ok', 'Skopiowano do schowka.'); } catch { $('#md').select(); document.execCommand('copy'); show('ok', 'Skopiowano.'); } });
+$('#copy').addEventListener('click', async () => {
+  const b = $('#copy'), old = b.textContent;
+  try { await navigator.clipboard.writeText($('#md').value); } catch { $('#md').select(); document.execCommand('copy'); }
+  b.textContent = 'Skopiowano ✓ – wklej do czatu'; setTimeout(() => b.textContent = old, 1800);
+});
 </script>
 </body>
 </html>

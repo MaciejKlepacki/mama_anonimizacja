@@ -21,7 +21,17 @@ Wszystko działa na `localhost`; pliki nie są nigdzie wysyłane ani zapisywane 
    - bez zbędnych pustych linii i formatowania.
 4. Osobno dostępna jest **mapa placeholderów** (JSON, tylko lokalnie) – do odczytania odpowiedzi modelu.
 
-## Uruchomienie
+## Instalacja na Windows (ikona na pulpicie)
+
+1. Pobierz repo (Code → Download ZIP) i rozpakuj, np. do `C:\Anonimizacja`.
+2. Dwukliknij **`instaluj.bat`** i poczekaj do końca (kilka minut, jednorazowo). Instalator sam doinstaluje
+   Pythona (przez `winget`), biblioteki i model językowy.
+3. Na pulpicie pojawi się ikona **„Anonimizacja dokumentów”** – dwuklik otwiera osobne okno aplikacji
+   (Edge/Chrome w trybie aplikacji). Zamknięcie okna wyłącza program.
+
+Dzienniki: `%LOCALAPPDATA%\mama_anonimizacja\aplikacja.log`. Odinstalowanie: usuń folder i skrót z pulpitu.
+
+## Uruchomienie (ręczne / deweloperskie)
 
 Wymagany Python 3.10+ (testowane na 3.13).
 
