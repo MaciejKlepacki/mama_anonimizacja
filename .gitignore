@@ -29,3 +29,6 @@ config/settings.json
 
 # Testy
 .pytest_cache/
+
+# Konfiguracja lokalna Claude Code
+.claude/

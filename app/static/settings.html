@@ -16,7 +16,7 @@
   <div id="msg"></div>
   <div class="card">
     <h3 style="margin-top:0">Rodzaje danych (encje Presidio)</h3>
-    <p class="muted">Etykieta = nazwa placeholdera (np. OSOBA → <code>[OSOBA_1]</code>). Próg = minimalna pewność wykrycia (0–1); niższy próg = więcej podmian, więcej fałszywych trafień.</p>
+    <p class="muted">Etykieta = nazwa placeholdera (np. OSOBA → <code>[OSOBA_1]</code>). Próg = minimalna pewność wykrycia (0–1); niższy próg = więcej podmian, więcej fałszywych trafień. Niepewne trafienia (np. organizacje wg modelu, ulice bez numeru, numery spraw) program i tak oznacza w podglądzie jako „do sprawdzenia”.</p>
     <table id="ents"><thead><tr><th>Włącz</th><th>Encja</th><th>Opis</th><th>Etykieta</th><th>Próg</th></tr></thead><tbody></tbody></table>
   </div>
 
@@ -49,7 +49,9 @@
       <h3 style="margin-top:0">Czytanie Worda</h3>
       <label class="chk"><input type="checkbox" id="d_bold"> Pogrubione / wyśrodkowane linie traktuj jak nagłówki</label><br>
       <label class="chk"><input type="checkbox" id="d_foot"> Dołącz przypisy dolne</label><br>
-      <label class="chk"><input type="checkbox" id="d_hf"> Dołącz nagłówki i stopki stron</label>
+      <label class="chk"><input type="checkbox" id="d_hf"> Dołącz nagłówki i stopki stron</label><br>
+      <label class="chk"><input type="checkbox" id="d_merge"> Sklejaj linie z konwersji PDF w akapity (gdy każda linia to osobny akapit)</label><br>
+      <label class="chk"><input type="checkbox" id="d_pages"> Usuwaj samotne numery stron</label>
     </div>
     <div class="card">
       <h3 style="margin-top:0">Wynik Markdown</h3>
@@ -96,7 +98,7 @@ function fill() {
   $('#allow').value = S.allow_list.join('\n');
   $('#deny').value = Object.entries(S.deny_list).map(([k, v]) => k + ': ' + v.join('; ')).join('\n');
   $('#custom').value = JSON.stringify(S.custom_recognizers, null, 2);
-  $('#d_bold').checked = S.docx.detect_bold_headings; $('#d_foot').checked = S.docx.include_footnotes; $('#d_hf').checked = S.docx.include_headers_footers;
+  $('#d_bold').checked = S.docx.detect_bold_headings; $('#d_foot').checked = S.docx.include_footnotes; $('#d_hf').checked = S.docx.include_headers_footers; $('#d_merge').checked = S.docx.merge_wrapped_lines; $('#d_pages').checked = S.docx.drop_page_numbers;
   $('#o_title').value = S.output.title; $('#o_intro').checked = S.output.include_intro; $('#o_legend').checked = S.output.include_legend;
 }
 function collect() {
@@ -112,7 +114,7 @@ function collect() {
     if (ent && vals.length) out.deny_list[ent] = vals;
   }
   out.custom_recognizers = JSON.parse($('#custom').value || '[]');
-  out.docx = { detect_bold_headings: $('#d_bold').checked, include_footnotes: $('#d_foot').checked, include_headers_footers: $('#d_hf').checked };
+  out.docx = { detect_bold_headings: $('#d_bold').checked, include_footnotes: $('#d_foot').checked, include_headers_footers: $('#d_hf').checked, merge_wrapped_lines: $('#d_merge').checked, drop_page_numbers: $('#d_pages').checked };
   out.output = { title: $('#o_title').value, include_intro: $('#o_intro').checked, include_legend: $('#o_legend').checked };
   return out;
 }

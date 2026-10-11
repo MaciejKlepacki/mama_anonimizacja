@@ -1,25 +1,7 @@
 import json
 from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
 
-from app import main as main_mod
-from app.main import app
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    # izolacja pliku ustawień użytkownika
-    user_path = tmp_path / "settings.json"
-    import app.settings as st
-
-    monkeypatch.setattr(st, "USER_SETTINGS_PATH", user_path)
-    monkeypatch.setattr(main_mod, "load_settings", lambda: st.load_settings(user_path))
-    monkeypatch.setattr(main_mod, "save_settings", lambda s: st.save_settings(s, user_path))
-    monkeypatch.setattr(main_mod, "reset_settings", lambda: st.reset_settings(user_path))
-    with TestClient(app) as c:
-        yield c, user_path
 
 
 def test_pages(client):
@@ -40,11 +22,20 @@ def test_upload_docx(client, fixture_docx):
     assert j["filename"] == "Wyrok_przyklad_anonimizacja.md"
     assert "[OSOBA_5]" in j["markdown"] and "Kowalski" not in j["markdown"]
     assert any(m["placeholder"] == "[OSOBA_5]" for m in j["mapping"])
-    # podgląd: oryginał zachowuje tekst, wersja zanonimizowana ma placeholdery w tych samych miejscach
+    # podgląd: oryginał zachowuje tekst; warianty niosą typ, status i placeholder
     orig = "".join(s["t"] for b in j["preview"] if "orig" in b for s in b["orig"])
-    anon = "".join(s["t"] for b in j["preview"] if "anon" in b for s in b["anon"])
-    assert "Kowalskiego" in orig and "Kowalski" not in anon and "[OSOBA_" in anon
-    assert any(s.get("e") == "PERSON" for b in j["preview"] if "orig" in b for s in b["orig"])
+    assert "Kowalskiego" in orig
+    marked = [j["variants"][s["v"]] for b in j["preview"] if "orig" in b for s in b["orig"] if "v" in s]
+    assert any(v["e"] == "PERSON" and v["st"] == "sure" and v["p"] == "[OSOBA_5]" for v in marked)
+    assert j["doc_id"] and "todo" in j["review"]
+    # ponowny rendering z decyzją i ręcznym zaznaczeniem
+    vid = next(k for k, v in j["variants"].items() if v["t"] == "Jan Kowalski")
+    r2 = c.post("/api/render", json={"doc_id": j["doc_id"], "decisions": {vid: "no"}, "manual": [{"text": "Mokotów", "entity_type": "LOCATION"}]})
+    assert r2.status_code == 200, r2.text
+    j2 = r2.json()
+    assert "Jan Kowalski" in j2["markdown"] and "[MIEJSCOWOŚĆ_1]" in j2["markdown"] and j2["review"]["decided"] == 1
+    assert c.post("/api/render", json={"doc_id": "nope", "decisions": {}}).status_code == 404
+    assert c.get("/api/progress/abc").json()["total"] == 1
 
 
 def test_upload_rejects_non_docx(client):

@@ -19,14 +19,51 @@
     <div class="muted" id="fname">Anonimizacja uruchomi się od razu po wybraniu pliku.</div>
     <span id="change" class="hidden"><button type="button" tabindex="-1">Zmień plik</button></span>
   </label>
+  <div class="pastebox" id="pastebox">
+    <button type="button" class="linkbtn" id="pasteToggle">…albo wklej tekst zamiast pliku</button>
+    <div id="pasteArea" class="hidden">
+      <textarea id="pasteText" rows="8" placeholder="Wklej tutaj tekst z Worda lub PDF-a (łamanie linii z PDF zostanie sklejone w akapity)."></textarea>
+      <div class="row" style="margin-top:8px"><button class="primary" id="pasteGo">Anonimizuj wklejony tekst</button></div>
+    </div>
+  </div>
   <div id="msg"></div>
   <div id="boot" class="msg warn hidden">Uruchamiam silnik anonimizacji (chwilę potrwa, tylko przy starcie)… Możesz już wybrać plik.</div>
 
+  <div id="progress" class="card progress hidden">
+    <div class="spinner"></div>
+    <div class="pbody">
+      <div class="pstage" id="pstage">Wysyłam…</div>
+      <div class="pbar"><div class="pfill" id="pfill"></div></div>
+      <div class="muted" id="pinfo">Analiza dużego dokumentu może potrwać kilkadziesiąt sekund.</div>
+    </div>
+  </div>
+
   <div id="result" class="hidden" style="margin-top:14px">
+    <div class="reviewbar" id="reviewbar">
+      <div class="rv-counts">
+        <span class="rv-todo" id="rvTodo"></span>
+        <span class="rv-hint" id="rvHint"></span>
+        <span class="rv-done muted" id="rvDone"></span>
+      </div>
+      <div class="rv-actions">
+        <button id="rvPrev" title="Poprzedni do sprawdzenia">◀</button>
+        <button id="rvNext" class="primary" title="Następny do sprawdzenia">Następny ▶</button>
+        <button id="rvAcceptAll" title="Zatwierdź wszystkie pozostałe niepewne jako OK">Zatwierdź pozostałe</button>
+      </div>
+    </div>
+
     <button id="copy" class="copybig">Kopiuj Markdown</button>
-    <p class="legend-hint">Kolorem zaznaczono dane, które zostaną zanonimizowane. Najedź na zaznaczenie, żeby zobaczyć, czym zostanie zastąpione; kliknij, żeby podświetlić wszystkie jego wystąpienia.</p>
+    <p class="legend-hint">
+      <span class="lg lg-sure">pewne</span>
+      <span class="lg lg-review">do sprawdzenia – kliknij: OK / nie</span>
+      <span class="lg lg-off">zostaje w tekście (kliknij, by zmienić)</span>
+      <span class="lg lg-manual">zaznaczone markerem</span>
+    </p>
     <div class="docbox">
-      <label class="switch" id="swWrap" title="Pokaż w tekście placeholdery zamiast oryginalnych danych"><input type="checkbox" id="sw"><span class="track"></span><span>Pokaż [OSOBA_1]</span></label>
+      <div class="doctools">
+        <label class="switch" id="swWrap" title="Pokaż w tekście placeholdery zamiast oryginalnych danych"><input type="checkbox" id="sw"><span class="track"></span><span>Pokaż [OSOBA_1]</span></label>
+        <label class="switch marker" id="mkWrap" title="Marker: każde zaznaczenie myszą od razu anonimizuje tekst jako [ZANONIMIZOWANE_DANE_n]"><input type="checkbox" id="mk"><span class="track"></span><span>🖍 Marker</span></label>
+      </div>
       <div class="doc" id="doc"></div>
     </div>
 
@@ -37,7 +74,7 @@
 
     <div class="card">
       <details>
-        <summary><strong>Markdown do wklejenia</strong> <span class="muted">(możesz poprawić – „Kopiuj” i „Pobierz” użyją aktualnej treści)</span></summary>
+        <summary><strong>Markdown do wklejenia</strong> <span class="muted">(możesz poprawić – „Kopiuj” i „Pobierz” użyją aktualnej treści; po każdej decyzji treść jest generowana na nowo)</span></summary>
         <textarea class="md" id="md" spellcheck="false" style="margin-top:10px"></textarea>
       </details>
     </div>
@@ -49,14 +86,33 @@
       </details>
     </div>
   </div>
+
+  <!-- okienko decyzji (minimalne) -->
+  <div id="pop" class="pop hidden">
+    <div class="pop-head"><span class="pop-text" id="popText"></span><button class="pop-close" id="popClose" title="Zamknij">×</button></div>
+    <div class="pop-meta" id="popMeta"></div>
+    <div class="pop-row">
+      <button id="popYes" class="ok" title="Anonimizuj (wszystkie wystąpienia tego tekstu)">✓ OK</button>
+      <button id="popNo" class="no" title="Zostaw w tekście">✗ Nie</button>
+      <select id="popType" title="Typ danych"></select>
+      <select id="popMerge" title="To ta sama osoba / obiekt co…"><option value="">scal z…</option></select>
+    </div>
+  </div>
+
+  <!-- pasek wyboru typu dla ręcznego zaznaczenia (gdy marker wyłączony) -->
+  <div id="seltool" class="seltool hidden">
+    <span class="muted">„<span id="selText"></span>” jako:</span>
+    <span id="selButtons"></span>
+    <label class="chk" title="Wszystkie wystąpienia tego tekstu w dokumencie"><input type="checkbox" id="selAll" checked> wszędzie</label>
+  </div>
 </main>
 <script>
 const $ = s => document.querySelector(s);
-let data = null;
+let data = null;            // ostatnia odpowiedź serwera
+let srcName = null;         // nazwa pliku / "tekst"
+const review = { decisions: {}, merges: {}, manual: [] };   // decyzje recenzenta (wysyłane do /api/render)
 const hidden = new Set();
-const HUES = [215, 340, 140, 30, 275, 175, 55, 0, 320, 95, 200, 15];
-const hueOf = {}; let phHue = {};
-const hue = e => hueOf[e] ?? (hueOf[e] = HUES[Object.keys(hueOf).length % HUES.length]);
+const ST_NAME = { sure: 'pewne', review: 'do sprawdzenia', hint: 'sugestia' };
 
 // ---- stan silnika + sygnał życia (po zamknięciu okna aplikacja sama się wyłącza)
 (async function boot() {
@@ -71,48 +127,95 @@ const hue = e => hueOf[e] ?? (hueOf[e] = HUES[Object.keys(hueOf).length % HUES.l
 })();
 setInterval(() => fetch('/api/ping').catch(() => {}), 10000);
 
-// ---- wybór pliku (od razu uruchamia anonimizację)
+// ---- wybór pliku / wklejony tekst
 const drop = $('#drop'), input = $('#file');
 input.addEventListener('change', () => pick(input.files[0]));
 ['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
 ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', ev => pick(ev.dataTransfer.files[0]));
+$('#pasteToggle').addEventListener('click', () => { $('#pasteArea').classList.toggle('hidden'); if (!$('#pasteArea').classList.contains('hidden')) $('#pasteText').focus(); });
+$('#pasteGo').addEventListener('click', () => {
+  const t = $('#pasteText').value;
+  if (!t.trim()) { show('err', 'Wklej jakiś tekst.'); return; }
+  run('tekst', job => fetch('/api/anonymize-paste', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t, job_id: job, name: 'tekst' }) }));
+});
 function show(kind, text) { const m = $('#msg'); m.className = kind ? 'msg ' + kind : ''; m.textContent = text; }
+
+function setProgress(p) {
+  const pct = p.total ? Math.round(100 * p.done / p.total) : 0;
+  $('#pstage').textContent = p.stage + (p.total > 1 ? ` (${p.done}/${p.total})` : '') + '…';
+  $('#pfill').style.width = (p.stage === 'Buduję wynik' ? 100 : Math.max(4, pct)) + '%';
+  $('#pinfo').textContent = (p.seconds ? `${p.seconds} s · ` : '') + 'Analiza dużego dokumentu może potrwać kilkadziesiąt sekund.';
+}
 
 async function pick(f) {
   if (!f) return;
   if (!f.name.toLowerCase().endsWith('.docx')) { show('err', 'Wybierz plik .docx (w Wordzie: Zapisz jako → Dokument programu Word).'); return; }
   $('#fname').textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB) – przetwarzam…';
+  await run(f.name, job => { const fd = new FormData(); fd.append('file', f); fd.append('job_id', job); return fetch('/api/anonymize', { method: 'POST', body: fd }); });
+  input.value = '';
+}
+
+// wspólny przebieg: postęp + odpowiedź + render
+async function run(name, send) {
+  srcName = name;
   show('', '');
-  const fd = new FormData(); fd.append('file', f);
+  $('#result').classList.add('hidden'); $('#progress').classList.remove('hidden');
+  setProgress({ stage: 'Wysyłam', done: 0, total: 1 });
+  const job = 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const t0 = Date.now();
+  let polling = true;
+  (async () => { while (polling) { try { const p = await (await fetch('/api/progress/' + job)).json(); p.seconds = Math.round((Date.now() - t0) / 1000); if (polling) setProgress(p); } catch {} await new Promise(r => setTimeout(r, 700)); } })();
   try {
-    const r = await fetch('/api/anonymize', { method: 'POST', body: fd });
+    const r = await send(job);
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || r.statusText);
+    Object.assign(review, { decisions: {}, merges: {}, manual: [] });
     data = j; render(j);
-    $('#fname').textContent = f.name + ' · ' + Object.values(j.stats).reduce((a, b) => a + b, 0) + ' podmian w ' + j.seconds + ' s';
+    $('#fname').textContent = name + ' · ' + j.blocks + ' akapitów · ' + j.seconds + ' s';
     drop.classList.add('compact'); $('#dropBig').classList.add('hidden'); $('#change').classList.remove('hidden');
+    $('#pasteArea').classList.add('hidden');
     if (j.warnings.length) show('warn', j.warnings.join(' '));
-  } catch (e) { $('#fname').textContent = f.name; show('err', 'Błąd: ' + e.message); }
-  input.value = '';
+  } catch (e) { $('#fname').textContent = name; show('err', 'Błąd: ' + e.message); }
+  polling = false; $('#progress').classList.add('hidden');
+}
+
+// ---- ponowny rendering po decyzji
+async function rerender() {
+  if (!data) return;
+  const body = { doc_id: data.doc_id, decisions: review.decisions, merges: review.merges, manual: review.manual, filename: srcName };
+  const y = window.scrollY;
+  try {
+    const r = await fetch('/api/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    data = j; render(j); window.scrollTo(0, y);
+  } catch (e) { show('err', 'Błąd: ' + e.message); }
 }
 
 // ---- podgląd
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function variant(v) { return data.variants[v]; }
 function fill(parent, segs) {
   for (const s of segs) {
-    if (!s.e) { parent.appendChild(document.createTextNode(s.t)); continue; }
-    const m = el('mark', 'm', s.t);
-    m.dataset.e = s.e; m.dataset.p = s.p; m.dataset.o = s.t; m.style.setProperty('--h', hue(s.e));
-    m.style.setProperty('--bh', phHue[s.p] ?? 0);
-    m.dataset.tip = s.p;
-    if ($('#sw').checked) { m.textContent = s.p; m.dataset.tip = s.t; }
-    if (hidden.has(s.e)) m.classList.add('off');
+    if (!s.v) { parent.appendChild(document.createTextNode(s.t)); continue; }
+    const v = variant(s.v); if (!v) { parent.appendChild(document.createTextNode(s.t)); continue; }
+    const m = el('mark', 'm st-' + v.st, s.t);
+    m.dataset.v = s.v; m.dataset.e = v.e; m.dataset.k = v.k; m.dataset.o = s.t;
+    if (v.d) m.classList.add('d-' + v.d);
+    if (s.off) m.classList.add('inactive');
+    if (v.src === 'manual') m.classList.add('src-manual');
+    if (v.st !== 'sure' && !v.d) m.classList.add('todo');
+    const ph = v.p || '(zostaje w tekście)';
+    m.dataset.p = ph; m.dataset.tip = ph;
+    if ($('#sw').checked && !s.off && v.p) { m.textContent = v.p; m.dataset.tip = s.t; }
+    if (hidden.has(v.e)) m.classList.add('off');
     parent.appendChild(m);
   }
 }
 function blockEl(b) {
   const c = el('div', 'blk');
+  c.dataset.i = b.i;
   if (b.kind === 'heading') c.classList.add('b-h' + Math.min(b.level || 2, 6));
   else if (b.kind === 'footnote') { c.classList.add('b-fn'); c.appendChild(document.createTextNode('[^' + b.id + '] ')); }
   else if (b.kind === 'list') { c.classList.add('b-li'); c.dataset.bullet = b.ordered ? '–' : '•'; c.style.paddingLeft = (34 + (b.level || 0) * 18) + 'px'; }
@@ -124,7 +227,7 @@ function tableEl(b) {
   const t = el('table');
   for (const row of b.rows) {
     const tr = el('tr');
-    for (const cl of row) { const td = el('td'); fill(td, cl.orig); tr.appendChild(td); }
+    for (const cl of row) { const td = el('td'); td.dataset.i = cl.i; fill(td, cl.orig); tr.appendChild(td); }
     t.appendChild(tr);
   }
   return t;
@@ -132,60 +235,194 @@ function tableEl(b) {
 function render(j) {
   $('#result').classList.remove('hidden');
   $('#md').value = j.markdown;
-  hidden.clear();
-  // unikalny kolor obwódki dla każdej osoby / obiektu (kąt złoty = maksymalnie różne odcienie)
-  phHue = {}; j.mapping.forEach((m, i) => { phHue[m.placeholder] = Math.round((i * 137.508) % 360); });
-  $('#swWrap').classList.remove('hidden');
-  // legenda / filtry typów
+  const rv = j.review;
+  $('#rvTodo').textContent = rv.todo ? `Do sprawdzenia: ${rv.todo}` : 'Wszystko sprawdzone ✓';
+  $('#rvTodo').classList.toggle('zero', !rv.todo);
+  $('#rvHint').textContent = rv.hints ? `Sugestie: ${rv.hints}` : '';
+  $('#rvDone').textContent = rv.decided ? `Decyzje: ${rv.decided}` : '';
+  $('#rvNext').disabled = !(rv.todo + rv.hints); $('#rvPrev').disabled = !(rv.todo + rv.hints); $('#rvAcceptAll').disabled = !rv.todo;
+  $('#copy').textContent = rv.todo ? `Kopiuj Markdown (${rv.todo} do sprawdzenia)` : 'Kopiuj Markdown';
   const chips = $('#chips'); chips.innerHTML = '';
   for (const [k, v] of Object.entries(j.stats)) {
-    const b = el('button', 'chip'); b.style.setProperty('--h', hue(k)); b.type = 'button';
-    const dot = el('span', 'dot'); b.appendChild(dot); b.appendChild(document.createTextNode((j.entity_names[k] || k) + ': ' + v));
-    b.title = 'Pokaż / ukryj kolor tego typu';
+    const b = el('button', 'chip'); b.type = 'button';
+    b.textContent = (j.entity_names[k] || k) + ': ' + v;
+    b.title = 'Pokaż / ukryj zaznaczenia tego typu';
+    if (hidden.has(k)) b.classList.add('off');
     b.addEventListener('click', () => {
       hidden.has(k) ? hidden.delete(k) : hidden.add(k); b.classList.toggle('off', hidden.has(k));
       document.querySelectorAll('mark.m').forEach(m => m.classList.toggle('off', hidden.has(m.dataset.e)));
     });
     chips.appendChild(b);
   }
-  // podgląd dokumentu z zaznaczeniami
   const doc = $('#doc'); doc.innerHTML = '';
   for (const b of j.preview) doc.appendChild(b.kind === 'table' ? tableEl(b) : blockEl(b));
-  // mapa
   const tb = $('#map tbody'); tb.innerHTML = '';
   for (const m of j.mapping) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td><span class="ph"></span></td><td></td><td></td><td></td>`;
     tr.children[0].firstChild.textContent = m.placeholder; tr.children[1].textContent = j.entity_names[m.entity_type] || m.entity_type;
-    tr.children[2].textContent = m.variants.join(' · '); tr.children[3].textContent = m.count; tb.appendChild(tr);
+    tr.children[2].textContent = m.variants.join(' · ') + (m.review ? '  (do sprawdzenia)' : ''); tr.children[3].textContent = m.count; tb.appendChild(tr);
   }
+  closePop();
 }
-// kliknięcie zaznaczenia → podświetl wszystkie wystąpienia tego placeholdera (po obu stronach)
+
+// ---- okienko decyzji
+let popMark = null;
+function closePop() { $('#pop').classList.add('hidden'); popMark = null; document.querySelectorAll('mark.m.focus').forEach(x => x.classList.remove('focus')); }
+function openPop(m) {
+  popMark = m;
+  const v = variant(m.dataset.v);
+  document.querySelectorAll('mark.m.focus').forEach(x => x.classList.remove('focus'));
+  document.querySelectorAll('mark.m').forEach(x => { if (x.dataset.k === m.dataset.k) x.classList.add('focus'); });
+  $('#popText').textContent = v.t;
+  const meta = $('#popMeta'); meta.innerHTML = '';
+  const st = el('span', 'lg lg-' + (v.src === 'manual' ? 'manual' : v.st), v.src === 'manual' ? 'marker' : ST_NAME[v.st]);
+  st.title = v.why;
+  meta.appendChild(st);
+  meta.appendChild(el('span', 'ph', v.p || 'zostaje w tekście'));
+  meta.appendChild(el('span', 'muted', v.n + '×'));
+  const active = v.d ? v.d === 'yes' : v.st !== 'hint';
+  $('#popYes').classList.toggle('active', active);
+  $('#popNo').classList.toggle('active', !active);
+  const ts = $('#popType'); ts.innerHTML = '';
+  for (const t of [...new Set([v.e, ...data.manual_types])]) { const o = el('option', null, data.labels[t] || t); o.value = t; if (t === v.e) o.selected = true; ts.appendChild(o); }
+  const ms = $('#popMerge'); ms.innerHTML = '<option value="">scal z…</option>';
+  const current = review.merges[v.k] || '';
+  for (const m2 of data.mapping) {
+    const kid = Object.keys(data.keys).find(k => data.keys[k].p === m2.placeholder);
+    if (!kid || kid === v.k) continue;
+    const o = el('option', null, m2.placeholder + ' ' + m2.variants[0]); o.value = kid; if (kid === current) o.selected = true; ms.appendChild(o);
+  }
+  const pop = $('#pop'); pop.classList.remove('hidden');
+  const r = m.getBoundingClientRect(), pw = pop.offsetWidth;
+  let left = r.left + window.scrollX, top = r.bottom + window.scrollY + 6;
+  if (left + pw > window.scrollX + document.documentElement.clientWidth - 8) left = window.scrollX + document.documentElement.clientWidth - pw - 8;
+  pop.style.left = Math.max(8, left) + 'px'; pop.style.top = top + 'px';
+}
 $('#doc').addEventListener('click', ev => {
   const m = ev.target.closest('mark.m'); if (!m) return;
-  const was = m.classList.contains('focus');
-  document.querySelectorAll('mark.m.focus').forEach(x => x.classList.remove('focus'));
-  if (was) return;
-  const all = [...document.querySelectorAll('mark.m')].filter(x => x.dataset.p === m.dataset.p);
-  all.forEach(x => x.classList.add('focus'));
+  if (popMark === m) { closePop(); return; }
+  openPop(m);
+});
+$('#popClose').addEventListener('click', closePop);
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { closePop(); $('#seltool').classList.add('hidden'); } });
+document.addEventListener('click', ev => { const t = ev.target instanceof Element ? ev.target : null; if (!t || (!t.closest('#pop') && !t.closest('mark.m'))) closePop(); });
+function decide(d) {
+  if (!popMark) return;
+  const v = variant(popMark.dataset.v);
+  if (v.src === 'manual') {
+    if (d === 'no') review.manual = review.manual.filter(x => x.text !== v.t);   // ręczne: "nie" = usuń
+  } else {
+    review.decisions[popMark.dataset.v] = d;
+    if (d === 'no') review.manual = review.manual.filter(x => x.text !== v.t);
+  }
+  rerender();
+}
+$('#popYes').addEventListener('click', () => decide('yes'));
+$('#popNo').addEventListener('click', () => decide('no'));
+$('#popType').addEventListener('change', () => {
+  if (!popMark) return;
+  const v = variant(popMark.dataset.v), t = $('#popType').value;
+  if (t === v.e) return;
+  // zmiana typu = odrzucenie automatycznego wariantu + ręczne zaznaczenie z nowym typem
+  if (v.src !== 'manual') review.decisions[popMark.dataset.v] = 'no';
+  review.manual = review.manual.filter(x => x.text !== v.t);
+  review.manual.push({ text: v.t, entity_type: t, all_occurrences: true });
+  rerender();
+});
+$('#popMerge').addEventListener('change', () => {
+  if (!popMark) return;
+  const v = variant(popMark.dataset.v), target = $('#popMerge').value;
+  if (target) review.merges[v.k] = target; else delete review.merges[v.k];
+  if (!v.d && v.st !== 'sure' && v.src !== 'manual') review.decisions[popMark.dataset.v] = 'yes';
+  rerender();
 });
 
-// ---- przełącznik: oryginał ↔ placeholdery (kolory zostają)
+// ---- nawigacja po fragmentach do sprawdzenia
+let navIdx = -1;
+function goto(step) {
+  const marks = [...document.querySelectorAll('mark.m.todo')]; if (!marks.length) return;
+  navIdx = ((navIdx + step) % marks.length + marks.length) % marks.length;
+  const m = marks[navIdx];
+  m.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  setTimeout(() => openPop(m), 250);
+}
+$('#rvNext').addEventListener('click', () => goto(1));
+$('#rvPrev').addEventListener('click', () => goto(-1));
+$('#rvAcceptAll').addEventListener('click', () => {
+  for (const [vid, v] of Object.entries(data.variants)) if (v.st === 'review' && !v.d) review.decisions[vid] = 'yes';
+  rerender();
+});
+
+// ---- ręczne zaznaczanie: marker (od razu) albo pasek wyboru typu
+function selectionInfo() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const holder = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+  const box = holder.closest('[data-i]'); if (!box || !$('#doc').contains(box)) return null;
+  if (range.startContainer.parentElement.closest('mark.m') || range.endContainer.parentElement.closest('mark.m')) return null;
+  const text = sel.toString().replace(/\s+/g, ' ').trim();
+  if (text.length < 2 || text.length > 200) return null;
+  let start = 0; const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+  let node, first = true; while ((node = walker.nextNode())) {
+    const m = node.parentElement.closest('mark.m'); let len = m ? m.dataset.o.length : node.length;
+    if (first && box.classList.contains('b-fn')) len = 0; // prefiks "[^1] " nie należy do tekstu
+    first = false;
+    if (node === range.startContainer) { start += m ? 0 : range.startOffset; break; }
+    start += len;
+  }
+  return { text, item: parseInt(box.dataset.i), start, end: start + text.length, range };
+}
+function addManual(info, type, all) {
+  review.manual.push({ text: info.text, entity_type: type, all_occurrences: all, item: info.item, start: info.start, end: info.end });
+  $('#seltool').classList.add('hidden'); window.getSelection().removeAllRanges(); rerender();
+}
+document.addEventListener('mouseup', ev => {
+  const tgt = ev.target instanceof Element ? ev.target : null;
+  if (tgt && (tgt.closest('#seltool') || tgt.closest('#pop'))) return;
+  setTimeout(() => {
+    const info = selectionInfo(); const tool = $('#seltool');
+    if (!info || !data) { tool.classList.add('hidden'); return; }
+    if ($('#sw').checked) { show('warn', 'Żeby zaznaczać ręcznie, wyłącz „Pokaż [OSOBA_1]”.'); tool.classList.add('hidden'); return; }
+    if ($('#mk').checked) { addManual(info, 'OTHER', true); return; }   // marker: bez pytania
+    $('#selText').textContent = info.text;
+    const sb = $('#selButtons'); sb.innerHTML = '';
+    for (const t of data.manual_types) {
+      const b = el('button', 'tiny', data.labels[t] || t); b.title = data.entity_names[t] || t;
+      b.addEventListener('click', () => addManual(info, t, $('#selAll').checked));
+      sb.appendChild(b);
+    }
+    const r = info.range.getBoundingClientRect();
+    tool.classList.remove('hidden');
+    let left = r.left + window.scrollX, top = r.bottom + window.scrollY + 6;
+    if (left + tool.offsetWidth > window.scrollX + document.documentElement.clientWidth - 8) left = window.scrollX + document.documentElement.clientWidth - tool.offsetWidth - 8;
+    tool.style.left = Math.max(8, left) + 'px'; tool.style.top = top + 'px';
+  }, 10);
+});
+$('#mk').addEventListener('change', () => { $('#doc').classList.toggle('marker', $('#mk').checked); $('#seltool').classList.add('hidden'); });
+
+// ---- przełącznik: oryginał ↔ placeholdery
 $('#sw').addEventListener('change', () => {
   const on = $('#sw').checked;
-  document.querySelectorAll('mark.m').forEach(m => { m.textContent = on ? m.dataset.p : m.dataset.o; m.dataset.tip = on ? m.dataset.o : m.dataset.p; });
+  document.querySelectorAll('mark.m').forEach(m => {
+    const act = !m.classList.contains('inactive') && m.dataset.p && !m.dataset.p.startsWith('(');
+    m.textContent = on && act ? m.dataset.p : m.dataset.o; m.dataset.tip = on && act ? m.dataset.o : m.dataset.p;
+  });
   $('#doc').classList.toggle('showph', on);
 });
 
-// ---- widoki i akcje
+// ---- akcje
 function dl(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
 $('#download').addEventListener('click', () => dl(data.filename, $('#md').value, 'text/markdown;charset=utf-8'));
 $('#dlmap').addEventListener('click', () => dl(data.mapping_filename, JSON.stringify(data.mapping, null, 2), 'application/json'));
 $('#copy').addEventListener('click', async () => {
   const b = $('#copy'), old = b.textContent;
+  if (data && data.review.todo && !confirm(`Zostało ${data.review.todo} fragmentów do sprawdzenia. Skopiować mimo to?`)) return;
   try { await navigator.clipboard.writeText($('#md').value); } catch { $('#md').select(); document.execCommand('copy'); }
   b.textContent = 'Skopiowano ✓ – wklej do czatu'; setTimeout(() => b.textContent = old, 1800);
 });
+window.addEventListener('beforeunload', () => { if (data && data.doc_id) fetch('/api/doc/' + data.doc_id, { method: 'DELETE', keepalive: true }).catch(() => {}); });
 </script>
 </body>
 </html>
