@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ustawienia anonimizacji</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Ustawienia anonimizacji</h1>
+  <span class="muted">zapisywane w <code>config/settings.json</code></span>
+  <nav style="margin-left:auto"><a href="/">Dokument</a><a href="/settings">Ustawienia</a></nav>
+</header>
+<main>
+  <div id="msg"></div>
+  <div class="card">
+    <h3 style="margin-top:0">Rodzaje danych (encje Presidio)</h3>
+    <p class="muted">Etykieta = nazwa placeholdera (np. OSOBA → <code>[OSOBA_1]</code>). Próg = minimalna pewność wykrycia (0–1); niższy próg = więcej podmian, więcej fałszywych trafień.</p>
+    <table id="ents"><thead><tr><th>Włącz</th><th>Encja</th><th>Opis</th><th>Etykieta</th><th>Próg</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin-top:0">Nigdy nie anonimizuj (allow-lista)</h3>
+      <p class="muted">Jedna fraza w linii. Nazwy sądów, organów, województw itp. Dopasowanie bez rozróżniania wielkości liter; fragment zawarty w frazie też jest dozwolony.</p>
+      <textarea id="allow" rows="10"></textarea>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Zawsze anonimizuj (deny-lista)</h3>
+      <p class="muted">Format: <code>ENCJA: fraza; fraza; …</code> – jedna encja w linii, np. <code>PERSON: Jan Kowalski; Kowalskiego</code> albo <code>ORGANIZATION: Spółka XYZ</code>.</p>
+      <textarea id="deny" rows="10"></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Własne rozpoznawacze (regex)</h3>
+    <p class="muted">Lista JSON. Każdy element: <code>name</code>, <code>entity</code> (np. NR_SPRAWY), opcjonalnie <code>label</code>, <code>patterns</code> (wyrażenia regularne Pythona), <code>deny_list</code>, <code>context</code> (słowa podbijające pewność), <code>score</code> (0–1), <code>threshold</code>, <code>enabled</code>. Dopasowany tekst w całości staje się placeholderem.</p>
+    <textarea id="custom" rows="10" spellcheck="false"></textarea>
+    <details style="margin-top:8px"><summary class="muted">Przykład</summary>
+<pre class="muted">[
+  {"name": "nr decyzji", "entity": "NR_DECYZJI", "label": "DECYZJA",
+   "patterns": ["\\b[A-Z]{1,4}-[A-Z]{1,4}\\.\\d{3,5}\\.\\d{1,4}\\.\\d{4}\\b"], "score": 0.7}
+]</pre></details>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin-top:0">Czytanie Worda</h3>
+      <label class="chk"><input type="checkbox" id="d_bold"> Pogrubione / wyśrodkowane linie traktuj jak nagłówki</label><br>
+      <label class="chk"><input type="checkbox" id="d_foot"> Dołącz przypisy dolne</label><br>
+      <label class="chk"><input type="checkbox" id="d_hf"> Dołącz nagłówki i stopki stron</label>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Wynik Markdown</h3>
+      <label>Tytuł dokumentu <input type="text" id="o_title"></label><br><br>
+      <label class="chk"><input type="checkbox" id="o_intro"> Dodaj wstęp dla modelu (objaśnienie placeholderów)</label><br>
+      <label class="chk"><input type="checkbox" id="o_legend"> Dodaj legendę placeholderów</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button class="primary" id="save">Zapisz ustawienia</button>
+      <button id="reset">Przywróć domyślne</button>
+      <span class="muted" id="status"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Test na tekście</h3>
+    <p class="muted">Wklej fragment, aby sprawdzić działanie <em>bieżących (także niezapisanych)</em> ustawień.</p>
+    <textarea id="t_in" rows="6">Skarżący Jan Kowalski, zam. ul. Długa 5 m. 3, 00-001 Warszawa, wniósł skargę dotyczącą działki nr 123/4, obręb Mokotów, KW WA1M/00123456/7. Pełnomocnikiem Jana Kowalskiego jest adw. Anna Nowak (tel. 601 234 567).</textarea>
+    <div class="row" style="margin:10px 0"><button id="t_go">Testuj</button></div>
+    <textarea id="t_out" rows="6" readonly></textarea>
+    <table id="t_map" style="margin-top:10px"><tbody></tbody></table>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let S = null, NAMES = {};
+function show(kind, text) { const m = $('#msg'); m.className = kind ? 'msg ' + kind : ''; m.textContent = text; }
+async function load() {
+  const j = await (await fetch('/api/settings')).json();
+  S = j.settings; NAMES = j.entity_names; fill();
+}
+function fill() {
+  const tb = $('#ents tbody'); tb.innerHTML = '';
+  for (const [ent, cfg] of Object.entries(S.entities)) {
+    const tr = document.createElement('tr'); tr.className = 'ent-row'; tr.dataset.ent = ent;
+    tr.innerHTML = `<td><input type="checkbox" class="en"></td><td><code></code></td><td class="muted"></td><td><input type="text" class="lb"></td><td><input type="number" class="th" min="0" max="1" step="0.05"></td>`;
+    tr.querySelector('.en').checked = cfg.enabled; tr.querySelector('code').textContent = ent;
+    tr.children[2].textContent = NAMES[ent] || ''; tr.querySelector('.lb').value = cfg.label; tr.querySelector('.th').value = cfg.threshold;
+    tb.appendChild(tr);
+  }
+  $('#allow').value = S.allow_list.join('\n');
+  $('#deny').value = Object.entries(S.deny_list).map(([k, v]) => k + ': ' + v.join('; ')).join('\n');
+  $('#custom').value = JSON.stringify(S.custom_recognizers, null, 2);
+  $('#d_bold').checked = S.docx.detect_bold_headings; $('#d_foot').checked = S.docx.include_footnotes; $('#d_hf').checked = S.docx.include_headers_footers;
+  $('#o_title').value = S.output.title; $('#o_intro').checked = S.output.include_intro; $('#o_legend').checked = S.output.include_legend;
+}
+function collect() {
+  const out = JSON.parse(JSON.stringify(S));
+  for (const tr of document.querySelectorAll('#ents tbody tr')) {
+    out.entities[tr.dataset.ent] = { enabled: tr.querySelector('.en').checked, label: tr.querySelector('.lb').value.trim(), threshold: parseFloat(tr.querySelector('.th').value) || 0 };
+  }
+  out.allow_list = $('#allow').value.split('\n').map(s => s.trim()).filter(Boolean);
+  out.deny_list = {};
+  for (const line of $('#deny').value.split('\n')) {
+    const i = line.indexOf(':'); if (i < 0) continue;
+    const ent = line.slice(0, i).trim().toUpperCase().replace(/\s+/g, '_'); const vals = line.slice(i + 1).split(';').map(s => s.trim()).filter(Boolean);
+    if (ent && vals.length) out.deny_list[ent] = vals;
+  }
+  out.custom_recognizers = JSON.parse($('#custom').value || '[]');
+  out.docx = { detect_bold_headings: $('#d_bold').checked, include_footnotes: $('#d_foot').checked, include_headers_footers: $('#d_hf').checked };
+  out.output = { title: $('#o_title').value, include_intro: $('#o_intro').checked, include_legend: $('#o_legend').checked };
+  return out;
+}
+async function send(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail));
+  return j;
+}
+$('#save').addEventListener('click', async () => {
+  try { $('#status').textContent = 'Zapisuję…'; const j = await send('PUT', '/api/settings', collect()); S = j.settings; fill(); show('ok', 'Zapisano. Nowe ustawienia obowiązują od następnego dokumentu.'); }
+  catch (e) { show('err', 'Błąd: ' + e.message); }
+  $('#status').textContent = '';
+});
+$('#reset').addEventListener('click', async () => {
+  if (!confirm('Przywrócić ustawienia domyślne? Twoje zmiany zostaną usunięte.')) return;
+  try { const j = await send('POST', '/api/settings/reset'); S = j.settings; fill(); show('ok', 'Przywrócono domyślne.'); } catch (e) { show('err', 'Błąd: ' + e.message); }
+});
+$('#t_go').addEventListener('click', async () => {
+  try {
+    $('#status').textContent = 'Testuję…';
+    const j = await send('POST', '/api/anonymize-text', { text: $('#t_in').value, settings: collect() });
+    $('#t_out').value = j.markdown;
+    const tb = $('#t_map tbody'); tb.innerHTML = '';
+    for (const m of j.mapping) { const tr = document.createElement('tr'); tr.innerHTML = '<td><span class="ph"></span></td><td></td><td></td>'; tr.children[0].firstChild.textContent = m.placeholder; tr.children[1].textContent = NAMES[m.entity_type] || m.entity_type; tr.children[2].textContent = m.variants.join(' · '); tb.appendChild(tr); }
+    show('', '');
+  } catch (e) { show('err', 'Błąd: ' + e.message); }
+  $('#status').textContent = '';
+});
+load().catch(e => show('err', 'Nie udało się wczytać ustawień: ' + e.message));
+</script>
+</body>
+</html>
