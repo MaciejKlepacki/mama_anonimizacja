@@ -1,4 +1,4 @@
-"""Serwer lokalny (FastAPI): upload .docx → analiza → przegląd decyzji → Markdown; ustawienia; test na tekście."""
+"""Serwer lokalny (FastAPI): upload .docx / .pdf → analiza → przegląd decyzji → Markdown; ustawienia; test na tekście."""
 
 from __future__ import annotations
 
@@ -22,7 +22,8 @@ from starlette.concurrency import run_in_threadpool
 from . import __version__
 from .engine import get_anonymizer
 from .markdown import ENTITY_NAMES
-from .pipeline import MANUAL_ENTITY_TYPES, MANUAL_LABELS, DocState, ManualSpan, Result, analyze_document, analyze_text, anonymize_plain_text, render
+from .pdf_reader import PdfError
+from .pipeline import MANUAL_ENTITY_TYPES, MANUAL_LABELS, DocState, ManualSpan, Result, analyze_file, analyze_text, anonymize_plain_text, render
 from .settings import DEFAULT_SETTINGS_PATH, Settings, load_settings, reset_settings, save_settings
 
 log = logging.getLogger("mama_anonimizacja")
@@ -131,12 +132,15 @@ def _payload(result: Result, name: str, settings: Settings) -> Dict[str, Any]:
 @app.post("/api/anonymize")
 async def api_anonymize(file: UploadFile = File(...), job_id: Optional[str] = Form(None)) -> JSONResponse:
     name = file.filename or "dokument.docx"
-    if not name.lower().endswith(".docx"):
-        raise HTTPException(400, "Obsługiwane są tylko pliki .docx (Word). Zapisz .doc jako .docx.")
+    is_pdf = name.lower().endswith(".pdf")
+    if not (is_pdf or name.lower().endswith(".docx")):
+        raise HTTPException(400, "Obsługiwane są pliki .docx (Word) i .pdf. Zapisz .doc jako .docx.")
     data = await file.read()
     if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
         raise HTTPException(413, f"Plik jest większy niż {MAX_UPLOAD_MB} MB.")
-    if not data[:2] == b"PK":
+    if is_pdf and b"%PDF" not in data[:1024]:
+        raise HTTPException(400, "To nie jest poprawny plik .pdf.")
+    if not is_pdf and not data[:2] == b"PK":
         raise HTTPException(400, "To nie jest poprawny plik .docx.")
     settings = load_settings()
     job = job_id if job_id and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", job_id) else None
@@ -147,9 +151,11 @@ async def api_anonymize(file: UploadFile = File(...), job_id: Optional[str] = Fo
             PROGRESS[job] = {"stage": stage, "done": done, "total": total, "seconds": round(time.time() - t0, 1)}
 
     try:
-        state = await run_in_threadpool(analyze_document, data, settings, name, progress)
+        state = await run_in_threadpool(analyze_file, data, settings, name, progress)
         progress("Buduję wynik", 0, 1)
         result = render(state)
+    except PdfError as e:
+        raise HTTPException(422, str(e)) from e
     except Exception as e:  # noqa: BLE001
         log.exception("Błąd anonimizacji")
         raise HTTPException(500, f"Błąd przetwarzania dokumentu: {e}") from e
