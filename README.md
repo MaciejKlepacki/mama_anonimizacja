@@ -1,13 +1,16 @@
 # mama_anonimizacja
 
-Lokalna aplikacja do anonimizacji dokumentów sądowych: **Word (.docx) → Markdown** z użyciem
+Lokalna aplikacja do anonimizacji dokumentów sądowych: **Word (.docx) / PDF → Markdown** z użyciem
 [Microsoft Presidio](https://microsoft.github.io/presidio/) i polskiego modelu spaCy (`pl_core_news_lg`).
 Wszystko działa na `localhost`; pliki nie są nigdzie wysyłane ani zapisywane na dysku.
 
 ## Co robi
 
-1. Wrzucasz plik `.docx` w przeglądarce (http://127.0.0.1:8765) **albo wklejasz tekst** („…albo wklej tekst
-   zamiast pliku”) – tekst z PDF-a lub Worda przechodzi przez to samo sklejanie połamanych linii.
+1. Wrzucasz plik `.docx` lub `.pdf` w przeglądarce (http://127.0.0.1:8765) **albo wklejasz tekst** („…albo wklej
+   tekst zamiast pliku”) – tekst z PDF-a lub Worda przechodzi przez to samo sklejanie połamanych linii.
+   PDF jest czytany lokalnie (PyMuPDF) z warstwy tekstowej i dalej traktowany dokładnie jak wklejony tekst.
+   **Skany (PDF bez warstwy tekstowej) nie są obsługiwane** – program pokaże komunikat; zrób najpierw OCR
+   w innym programie albo wklej tekst. Strony bez tekstu w PDF-ie mieszanym są pomijane z ostrzeżeniem.
 2. Pipeline wykrywa i podmienia dane wrażliwe na spójne placeholdery, domyślnie:
    - imiona i nazwiska → `[OSOBA_1]`, `[OSOBA_2]`, …
    - adresy (ulica + numer, kod pocztowy + miejscowość) → `[ADRES_n]`
@@ -81,7 +84,11 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 python -m app.cli wyrok.docx                  # → wyrok_anonimizacja.md obok pliku
 python -m app.cli wyrok.docx -o out.md --mapa mapa.json
 python -m app.cli *.docx                      # wiele plików
+python -m app.cli decyzja.pdf                 # PDF z warstwą tekstową → decyzja_anonimizacja.md
+python -m app.cli *.docx *.pdf --mapa mapa.json
 ```
+
+Kod wyjścia: `2` – brak pliku lub nieobsługiwany format, `3` – PDF bez tekstu (skan), zaszyfrowany lub uszkodzony.
 
 ## Ustawienia
 
@@ -102,6 +109,7 @@ Na stronie ustawień jest pole „Test na tekście", które sprawdza bieżące (
 
 ```
 .docx ──python-docx──▶ bloki (nagłówki/akapity/listy/tabele/przypisy)
+.pdf  ──PyMuPDF (warstwa tekstowa, bloki w kolejności czytania)──▶ tekst jak wklejony (linia = akapit)
       ──sklejanie linii z PDF, usuwanie numerów stron──▶ pełne akapity (nazwiska nie są rozcięte)
       ──Presidio Analyzer (spaCy NER pl + rozpoznawacze PL), porcjami po ~4000 znaków──▶ kandydaci
       ──ocena pewności (pewne / do sprawdzenia / sugestia), filtr organów publicznych, skrótów, ról──▶ fragmenty
@@ -123,6 +131,7 @@ Ważne pliki:
 | `app/names.py` | rdzenie odmiany nazw własnych, lista imion (płeć), zwroty pan/pani |
 | `app/engine.py` | konfiguracja Presidio, allow-lista (odporna na odmianę), ocena pewności, klucze spójności, propagacja |
 | `app/docx_reader.py` | czytanie Worda do bloków |
+| `app/pdf_reader.py` | PDF → tekst (PyMuPDF, lokalnie); wykrywa skany bez warstwy tekstowej |
 | `app/markdown.py` | rendering Markdown pod LLM |
 | `app/pipeline.py` | analiza dokumentu (raz) + rendering z decyzjami recenzenta (wielokrotnie) |
 | `app/main.py` | serwer FastAPI + UI (`app/static/`); `/api/anonymize`, `/api/progress/{job}`, `/api/render` |
@@ -136,6 +145,8 @@ pytest -q
 
 Testy używają fikcyjnego wyroku (`tests/make_fixture.py`) oraz fikcyjnej decyzji „z konwersji PDF”
 (`tests/make_fixture_pdf.py`: linia = akapit, numery stron luzem, nazwiska rozcięte między linie).
+Ta sama decyzja jest składana w prawdziwy wielostronicowy PDF (`tests/make_fixture_pdf_file.py`, generowany
+w katalogu tymczasowym), razem z „skanem” bez tekstu i PDF-em częściowo zeskanowanym.
 
 ## Ograniczenia
 
@@ -143,5 +154,8 @@ Testy używają fikcyjnego wyroku (`tests/make_fixture.py`) oraz fikcyjnej decyz
   przejrzyj wynik** – przycisk „Następny do sprawdzenia” prowadzi po niepewnych fragmentach, a pominięty
   tekst można zaznaczyć myszą. Przycisk „Kopiuj” ostrzega, gdy coś zostało niesprawdzone.
 - Organy publiczne (sądy, prezydent miasta, wojewoda, rada, ministerstwa) celowo **nie są** anonimizowane.
-- Obsługiwany jest tylko `.docx` (stary `.doc` zapisz w Wordzie jako `.docx`).
+- Obsługiwane są `.docx` i `.pdf` (stary `.doc` zapisz w Wordzie jako `.docx`).
+- PDF: tylko warstwa tekstowa, **bez OCR** – skany trzeba najpierw rozpoznać innym programem. Z PDF-a nie
+  odtwarzamy nagłówków, list numerowanych ani tabel (tekst idzie jak wklejony); powtarzające się nagłówki
+  i stopki stron zostają w tekście. PDF zabezpieczony hasłem trzeba najpierw odblokować.
 - Grafiki, pola formularzy i komentarze Worda są pomijane.
