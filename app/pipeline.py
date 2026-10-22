@@ -1,4 +1,4 @@
-"""Pipeline: .docx → bloki → analiza (Presidio + ocena pewności) → decyzje człowieka → Markdown + mapa.
+"""Pipeline: .docx (albo .pdf / wklejony tekst) → bloki → analiza (Presidio + ocena pewności) → decyzje człowieka → Markdown + mapa.
 
 Analiza (`analyze_document`) jest kosztowna i wykonywana raz; wynik (`DocState`) trzymamy w pamięci.
 Rendering (`render`) jest tani i powtarzany po każdej decyzji recenzenta (OK / nie OK / scal / dodaj ręcznie).
@@ -15,6 +15,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 from .docx_reader import Block, FootnoteBlock, TableBlock, TextBlock, drop_page_numbers, merge_wrapped_lines, read_docx
 from .engine import Anonymizer, Span, assign_keys, get_anonymizer
 from .markdown import ENTITY_NAMES, build_markdown
+from .pdf_reader import read_pdf_text
 from .settings import Settings, load_settings
 
 Progress = Optional[Callable[[str, int, int], None]]
@@ -119,6 +120,35 @@ def text_to_blocks(text: str, settings: Optional[Settings] = None) -> List[Block
 def analyze_text(text: str, settings: Optional[Settings] = None, source_name: Optional[str] = None, progress: Progress = None) -> DocState:
     settings = settings or load_settings()
     return analyze_document_blocks(text_to_blocks(text, settings), settings, source_name or "tekst", progress)
+
+
+def analyze_pdf(
+    source: Union[str, bytes],
+    settings: Optional[Settings] = None,
+    source_name: Optional[str] = None,
+    progress: Progress = None,
+) -> DocState:
+    """PDF → tekst (warstwa tekstowa) → ta sama ścieżka co wklejony tekst. Skan bez tekstu → PdfError."""
+    settings = settings or load_settings()
+    if progress:
+        progress("Czytam dokument PDF", 0, 1)
+    pdf = read_pdf_text(source)
+    state = analyze_text(pdf.text, settings, source_name or "dokument.pdf", progress)
+    state.warnings = pdf.warnings + state.warnings
+    return state
+
+
+def analyze_file(
+    source: Union[str, bytes],
+    settings: Optional[Settings] = None,
+    source_name: Optional[str] = None,
+    progress: Progress = None,
+) -> DocState:
+    """.pdf albo .docx – wybór po rozszerzeniu nazwy (lub ścieżki)."""
+    name = source_name or (source if isinstance(source, str) else "")
+    if name.lower().endswith(".pdf"):
+        return analyze_pdf(source, settings, source_name, progress)
+    return analyze_document(source, settings, source_name, progress)
 
 
 def analyze_document_blocks(
@@ -398,6 +428,16 @@ def anonymize_docx(
 ) -> Result:
     state = analyze_document(source, settings, source_name, progress)
     return render(state)
+
+
+def anonymize_file(
+    source: Union[str, bytes],
+    settings: Optional[Settings] = None,
+    source_name: Optional[str] = None,
+    progress: Progress = None,
+) -> Result:
+    """Jak `anonymize_docx`, ale przyjmuje też .pdf (po rozszerzeniu)."""
+    return render(analyze_file(source, settings, source_name, progress))
 
 
 def anonymize_plain_text(text: str, settings: Optional[Settings] = None) -> Result:

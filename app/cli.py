@@ -1,4 +1,4 @@
-"""CLI: python -m app.cli plik.docx [-o wynik.md] [--mapa mapa.json]"""
+"""CLI: python -m app.cli plik.docx|plik.pdf [-o wynik.md] [--mapa mapa.json]"""
 
 from __future__ import annotations
 
@@ -7,13 +7,16 @@ import json
 import sys
 from pathlib import Path
 
-from .pipeline import anonymize_docx
+from .pdf_reader import PdfError
+from .pipeline import anonymize_file
 from .settings import load_settings
+
+SUFFIXES = (".docx", ".pdf")
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Anonimizacja dokumentu Word (.docx) → Markdown (Presidio).")
-    ap.add_argument("docx", nargs="+", help="plik(i) .docx")
+    ap = argparse.ArgumentParser(description="Anonimizacja dokumentu Word (.docx) lub PDF → Markdown (Presidio).")
+    ap.add_argument("docx", nargs="+", metavar="plik", help="plik(i) .docx lub .pdf")
     ap.add_argument("-o", "--output", help="plik wyjściowy .md (tylko dla jednego pliku); domyślnie obok źródła")
     ap.add_argument("--mapa", help="zapisz mapę placeholderów (JSON) do podanego pliku")
     ap.add_argument("--stdout", action="store_true", help="wypisz Markdown na stdout zamiast do pliku")
@@ -28,7 +31,16 @@ def main(argv=None) -> int:
         if not path.is_file():
             print(f"Brak pliku: {path}", file=sys.stderr)
             return 2
-        result = anonymize_docx(str(path), settings, source_name=path.name)
+        if path.suffix.lower() not in SUFFIXES:
+            print(f"Nieobsługiwany format: {path.name} (obsługiwane: .docx, .pdf)", file=sys.stderr)
+            return 2
+        try:
+            result = anonymize_file(str(path), settings, source_name=path.name)
+        except PdfError as e:
+            print(f"{path.name}: {e}", file=sys.stderr)
+            return 3
+        for w in result.warnings:
+            print(f"{path.name}: uwaga: {w}", file=sys.stderr)
         if args.stdout:
             sys.stdout.write(result.markdown)
         else:

@@ -8,14 +8,14 @@
 </head>
 <body>
 <header>
-  <h1>Anonimizacja Word → Markdown</h1>
+  <h1>Anonimizacja Word / PDF → Markdown</h1>
   <span class="muted">działa wyłącznie lokalnie, pliki nie są zapisywane</span>
   <nav style="margin-left:auto"><a href="/">Dokument</a><a href="/settings">Ustawienia</a></nav>
 </header>
 <main>
   <label class="drop" id="drop">
-    <input type="file" id="file" accept=".docx">
-    <div id="dropBig"><strong>Przeciągnij plik .docx tutaj</strong> lub kliknij, aby wybrać</div>
+    <input type="file" id="file" accept=".docx,.pdf">
+    <div id="dropBig"><strong>Przeciągnij plik .docx lub .pdf tutaj</strong> lub kliknij, aby wybrać</div>
     <div class="muted" id="fname">Anonimizacja uruchomi się od razu po wybraniu pliku.</div>
     <span id="change" class="hidden"><button type="button" tabindex="-1">Zmień plik</button></span>
   </label>
@@ -150,7 +150,7 @@ function setProgress(p) {
 
 async function pick(f) {
   if (!f) return;
-  if (!f.name.toLowerCase().endsWith('.docx')) { show('err', 'Wybierz plik .docx (w Wordzie: Zapisz jako → Dokument programu Word).'); return; }
+  if (!/\.(docx|pdf)$/i.test(f.name)) { show('err', 'Wybierz plik .docx lub .pdf (stary .doc: w Wordzie Zapisz jako → Dokument programu Word).'); return; }
   $('#fname').textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB) – przetwarzam…';
   await run(f.name, job => { const fd = new FormData(); fd.append('file', f); fd.append('job_id', job); return fetch('/api/anonymize', { method: 'POST', body: fd }); });
   input.value = '';

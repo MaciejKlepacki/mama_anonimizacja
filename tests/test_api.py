@@ -40,10 +40,15 @@ def test_upload_docx(client, fixture_docx):
 
 def test_upload_rejects_non_docx(client):
     c, _ = client
-    r = c.post("/api/anonymize", files={"file": ("x.pdf", b"%PDF", "application/pdf")})
+    r = c.post("/api/anonymize", files={"file": ("x.txt", b"tekst", "text/plain")})
     assert r.status_code == 400
     r = c.post("/api/anonymize", files={"file": ("x.docx", b"nope", "application/octet-stream")})
     assert r.status_code == 400
+    r = c.post("/api/anonymize", files={"file": ("x.pdf", b"nope", "application/pdf")})
+    assert r.status_code == 400
+    # nagłówek PDF, ale plik uszkodzony → czytelny błąd, nie 500
+    r = c.post("/api/anonymize", files={"file": ("x.pdf", b"%PDF-1.7 broken", "application/pdf")})
+    assert r.status_code == 422 and "PDF" in r.json()["detail"]
 
 
 def test_settings_roundtrip(client):
